@@ -3,6 +3,7 @@
 ## 1. 系统概述
 
 SecLab是一个网络安全漏洞综合实验平台，包含：
+
 - **前端界面**：Vue3 + Vite + TypeScript
 - **后端微服务**：Spring Cloud + Docker容器化部署
 - **实验环境**：6个漏洞实验容器（SQL注入、XSS、CSRF、文件上传、目录遍历、命令注入）
@@ -11,6 +12,7 @@ SecLab是一个网络安全漏洞综合实验平台，包含：
 ## 2. 环境要求
 
 ### 2.1 基础环境
+
 - **操作系统**：Windows 10/11、Linux或macOS
 - **Docker**：Docker Desktop 4.0+
 - **Java**：JDK 17（必须）
@@ -19,7 +21,9 @@ SecLab是一个网络安全漏洞综合实验平台，包含：
 - **磁盘空间**：至少10GB可用空间
 
 ### 2.2 端口要求
+
 确保以下端口未被占用：
+
 - **前端**：5173（开发）、80（生产）
 - **后端服务**：8080-8095, 8761
 - **数据库**：3306
@@ -49,14 +53,12 @@ SecLab项目/
 1. **安装Docker Desktop**
    - 下载并安装Docker Desktop
    - 启动Docker服务
-
 2. **安装JDK 17**
    ```bash
    # 检查Java版本
    java -version
    # 确保显示Java 17
    ```
-
 3. **安装Node.js**
    ```bash
    # 检查Node.js版本
@@ -67,22 +69,25 @@ SecLab项目/
 ### 4.2 后端服务部署
 
 #### 方法一：一键部署（推荐）
+
 ```bash
 cd seclab/seclab
 .\rebuild-all.bat && .\rebuild-services.bat && .\start-all-services.bat
 ```
+
 （现在用下面这个打开！！！）
+
 ```bash
 cd D:\SecLab\seclab\seclab
 .\start-all-services.bat
 ```
 
 cd D:\SecLab\seclab\seclab\user-service
->> .\gradlew.bat bootRun
 
-
+> > .\gradlew\.bat bootRun
 
 #### 方法二：分步部署
+
 ```bash
 cd seclab/seclab
 
@@ -99,6 +104,7 @@ cd seclab/seclab
 ### 4.3 前端项目部署
 
 #### 4.3.1 安装依赖
+
 ```bash
 cd SecLab-FrontEnd-2
 
@@ -109,7 +115,9 @@ npm install
 ```
 
 #### 4.3.2 修复依赖问题
+
 如果遇到 `@lucky-canvas/vue` 相关错误：
+
 ```bash
 # 卸载冲突的依赖
 npm uninstall @lucky-canvas/vue
@@ -120,6 +128,7 @@ npm uninstall @lucky-canvas/vue
 ```
 
 #### 4.3.3 启动前端服务
+
 ```bash
 # 本地开发模式
 npm run dev
@@ -134,6 +143,7 @@ npx vite --host
 ### 4.4 AI Agent 服务部署
 
 #### 4.4.1 环境准备
+
 ```bash
 cd seclab/seclab/ai-agent-service
 
@@ -145,6 +155,7 @@ notepad .env
 ```
 
 #### 4.4.2 安装 Python 依赖
+
 ```bash
 # 确保已安装 Python 3.8+
 python --version
@@ -160,7 +171,9 @@ pip install -r requirements.txt
 ```
 
 #### 4.4.3 启动 Agent 服务
+
 **方式一：Python 直接运行（开发环境）**
+
 ```bash
 # 确保在 ai-agent-service 目录下
 cd seclab/seclab/ai-agent-service
@@ -174,6 +187,7 @@ python main.py
 ```
 
 **方式二：Docker 运行（生产环境）**
+
 ```bash
 cd seclab/seclab/ai-agent-service
 
@@ -185,25 +199,30 @@ docker logs -f seclab-ai-agent
 ```
 
 方式三：本机一键启动 AI Agent + cpolar
+
 ```bash
 cd D:\SecLab\seclab\seclab
 .\start-ai-agent-cpolar.bat
 ```
 
 **服务访问地址：**
-- 本地访问：http://localhost:8010
-- API 文档：http://localhost:8010/docs
-- 健康检查：http://localhost:8010/health
+
+- 本地访问：<http://localhost:8010>
+- API 文档：<http://localhost:8010/docs>
+- 健康检查：<http://localhost:8010/health>
 
 ### 4.5 cpolar 内网穿透部署
 
 #### 4.5.1 安装 cpolar
+
 **方式一：官网下载安装**
-1. 访问 https://www.cpolar.com/ 注册账号
+
+1. 访问 <https://www.cpolar.com/> 注册账号
 2. 下载 Windows 版本的 cpolar 客户端
 3. 解压并安装
 
 **方式二：使用 PowerShell 安装**
+
 ```powershell
 # 下载 cpolar
 Invoke-WebRequest -Uri "https://www.cpolar.com/static/downloads/releases/latest/cpolar-stable-windows-amd64.zip" -OutFile "cpolar.zip"
@@ -216,6 +235,7 @@ $env:Path += ";C:\cpolar"
 ```
 
 #### 4.5.2 配置 cpolar
+
 ```bash
 # 进入 cpolar 目录
 cd d:\cpolar
@@ -225,7 +245,9 @@ cd d:\cpolar
 ```
 
 #### 4.5.3 启动内网穿透
+
 **穿透 Agent 服务（8010 端口）：**
+
 ```bash
 # HTTP 隧道
 .\cpolar http 8010
@@ -235,16 +257,20 @@ cd d:\cpolar
 ```
 
 **穿透前端服务（5173 端口）：**
+
 ```bash
 .\cpolar http 5173
 ```
 
 #### 4.5.4 cpolar 后台管理
+
 启动后，可以访问 cpolar 后台管理界面查看隧道信息：
-- 本地管理地址：http://localhost:4040
+
+- 本地管理地址：<http://localhost:4040>
 - 可以查看所有活跃隧道、流量统计等
 
 **提示：** 建议创建一个批处理脚本方便一键启动：
+
 ```batch
 @echo off
 echo 正在启动 AI Agent 服务...
@@ -258,6 +284,7 @@ pause
 ### 4.6 数据库配置
 
 #### 4.6.1 导入主系统数据库
+
 ```bash
 # 确认MySQL容器已启动
 docker ps | findstr mysql
@@ -267,6 +294,7 @@ docker exec -i seclab-mysql mysql -uroot -pseclab123 seclab_db < ./数据库文�
 ```
 
 #### 4.6.2 导入实验环境数据库
+
 ```bash
 # SQL注入实验数据库
 docker exec -i sqli-lab_db_1 mysql -uroot -p123456 sqli_lab < ./数据库文件/sqli_lab.sql
@@ -275,37 +303,43 @@ docker exec -i sqli-lab_db_1 mysql -uroot -p123456 sqli_lab < ./数据库文件/
 ## 5. 服务访问
 
 ### 5.1 本地访问
-- **前端界面**：http://localhost:5173
-- **Eureka服务注册中心**：http://localhost:8761
-- **Gateway网关**：http://localhost:8085
-- **用户服务**：http://localhost:8081
-- **实验模块服务**：http://localhost:8082
-- **AI Agent 服务**：http://localhost:8010
-- **Agent API 文档**：http://localhost:8010/docs
-- **cpolar 管理后台**：http://localhost:4040
+
+- **前端界面**：<http://localhost:5173>
+- **Eureka服务注册中心**：<http://localhost:8761>
+- **Gateway网关**：<http://localhost:8085>
+- **用户服务**：<http://localhost:8081>
+- **实验模块服务**：<http://localhost:8082>
+- **AI Agent 服务**：<http://localhost:8010>
+- **Agent API 文档**：<http://localhost:8010/docs>
+- **cpolar 管理后台**：<http://localhost:4040>
 
 ### 5.2 公网访问（通过 cpolar）
+
 启动 cpolar 后，会获得公网访问地址，例如：
-- **前端公网地址**：https://xxx.cpolar.io
-- **AI Agent 公网地址**：https://yyy.cpolar.io
+
+- **前端公网地址**：<https://xxx.cpolar.io>
+- **AI Agent 公网地址**：<https://yyy.cpolar.io>
 
 ### 5.3 实验环境访问
-- **SQL注入实验**：http://localhost:8091
-- **XSS实验**：http://localhost:8092
-- **CSRF实验**：http://localhost:8093
-- **文件上传实验**：http://localhost:8094
-- **目录遍历实验**：http://localhost:8095
-- **命令注入实验**：http://localhost:8090
+
+- **SQL注入实验**：<http://localhost:8091>
+- **XSS实验**：<http://localhost:8092>
+- **CSRF实验**：<http://localhost:8093>
+- **文件上传实验**：<http://localhost:8094>
+- **目录遍历实验**：<http://localhost:8095>
+- **命令注入实验**：<http://localhost:8090>
 
 ## 6. 开发调试
 
 ### 6.1 前端调试
+
 ```bash
 cd SecLab-FrontEnd-2
 npm run dev
 ```
 
 ### 6.2 后端调试
+
 ```bash
 cd seclab/seclab
 # 查看服务日志
@@ -314,6 +348,7 @@ docker logs saclab-user-service
 ```
 
 ### 6.3 数据库调试
+
 ```bash
 # 连接主数据库
 docker exec -it seclab-mysql mysql -uroot -pseclab123
@@ -336,18 +371,21 @@ docker stop $(docker ps -q)
 ## 8. 系统功能
 
 ### 8.1 用户功能
+
 - 用户注册/登录
 - 个人信息管理
 - 头像上传
 - 学习进度跟踪
 
 ### 8.2 实验功能
+
 - 6个漏洞实验环境
 - 实验指导文档
 - 在线答题系统
 - 实验报告生成
 
 ### 8.3 AI 助手功能
+
 - **智能提示助手**：基于 Dify Agent 的 AI 助手，可根据学生操作提供阶梯式提示
 - **Docker 容器监控**：实时监控靶场容器状态，读取容器日志
 - **自动事件触发**：
@@ -358,11 +396,12 @@ docker stop $(docker ps -q)
 - **内网穿透支持**：通过 cpolar 实现公网访问，便于远程调试和协作
 
 ### 8.4 管理功能
+
 - 课程管理
 - 实验发布
 - 用户管理
 - 数据统计
 
----
+***
 
-**注意**：本文档基于当前项目状态编写，如有更新请及时同步修改。 
+**注意**：本文档基于当前项目状态编写，如有更新请及时同步修改。
