@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # 停止并移除可能已存在的容器
-docker-compose -f seclab/command-inject/docker-compose.yml down 2>/dev/null
+docker-compose -f command-inject/docker-compose.yml down 2>/dev/null
 
 # 启动命令注入靶机
-cd seclab/command-inject
+cd command-inject
 docker-compose up -d
 
 # 获取容器的IP地址和端口

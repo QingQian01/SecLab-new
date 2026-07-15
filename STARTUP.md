@@ -1,5 +1,5 @@
 后端
-cd D:\SecLab\seclab\seclab
+cd D:\SecLab\SecLab\seclab-backend
 .\start-all-services.bat
 
 
@@ -9,5 +9,5 @@ npm run dev
 
 
 ai
-cd D:\SecLab\seclab\seclab
+cd D:\SecLab\SecLab\seclab-backend
 .\start-ai-agent-cpolar.bat

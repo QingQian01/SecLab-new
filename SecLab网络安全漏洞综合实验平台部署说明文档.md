@@ -34,16 +34,23 @@ SecLab是一个网络安全漏洞综合实验平台，包含：
 ```
 SecLab项目/
 ├── SecLab-FrontEnd-2/          # 前端项目（Vue3 + Vite）
-├── seclab/seclab/              # 后端微服务
-├── 项目容器文件/                # 实验环境Docker配置
+├── seclab-backend/             # 后端微服务与靶场源码
+│   ├── gateway/                # 网关服务
+│   ├── eureka/                 # 服务注册中心
+│   ├── user-service/           # 用户服务
+│   ├── experiment-module-service/ # 课程模块服务
+│   ├── image-service/          # 图片服务
+│   ├── docker-service/         # Docker 容器管理服务
+│   ├── ai-agent-service/       # AI 辅助服务
 │   ├── sqli-lab/               # SQL注入实验
 │   ├── xss-lab/                # XSS实验
 │   ├── csrf-lab/               # CSRF实验
 │   ├── file-upload-lab/        # 文件上传实验
 │   ├── directory-traversal-lab/ # 目录遍历实验
 │   └── command-inject/         # 命令注入实验
-├── 数据库文件/                  # 数据库初始化脚本
-└── SecLab系统部署说明文档.md    # 本文档
+├── database/sql/               # 数据库主初始化脚本
+├── shujuku/                    # 数据库细粒度建表脚本
+└── SecLab网络安全漏洞综合实验平台部署说明文档.md  # 本文档
 ```
 
 ## 4. 部署流程
@@ -71,25 +78,25 @@ SecLab项目/
 #### 方法一：一键部署（推荐）
 
 ```bash
-cd seclab/seclab
+cd seclab-backend
 .\rebuild-all.bat && .\rebuild-services.bat && .\start-all-services.bat
 ```
 
 （现在用下面这个打开！！！）
 
 ```bash
-cd D:\SecLab\seclab\seclab
+cd D:\SecLab\SecLab\seclab-backend
 .\start-all-services.bat
 ```
 
-cd D:\SecLab\seclab\seclab\user-service
+cd D:\SecLab\SecLab\seclab-backend\user-service
 
 > > .\gradlew\.bat bootRun
 
 #### 方法二：分步部署
 
 ```bash
-cd seclab/seclab
+cd seclab-backend
 
 # 1. 编译微服务
 .\rebuild-all.bat
@@ -145,7 +152,7 @@ npx vite --host
 #### 4.4.1 环境准备
 
 ```bash
-cd seclab/seclab/ai-agent-service
+cd seclab-backend/ai-agent-service
 
 # 复制环境变量配置文件
 Copy-Item .env.example .env
@@ -176,7 +183,7 @@ pip install -r requirements.txt
 
 ```bash
 # 确保在 ai-agent-service 目录下
-cd seclab/seclab/ai-agent-service
+cd seclab-backend/ai-agent-service
 
 # 激活虚拟环境（如果使用）
 .\venv\Scripts\Activate
@@ -189,7 +196,7 @@ python main.py
 **方式二：Docker 运行（生产环境）**
 
 ```bash
-cd seclab/seclab/ai-agent-service
+cd seclab-backend/ai-agent-service
 
 # 使用 Docker Compose 启动
 docker-compose up -d
@@ -201,7 +208,7 @@ docker logs -f seclab-ai-agent
 方式三：本机一键启动 AI Agent + cpolar
 
 ```bash
-cd D:\SecLab\seclab\seclab
+cd D:\SecLab\SecLab\seclab-backend
 .\start-ai-agent-cpolar.bat
 ```
 
@@ -274,7 +281,7 @@ cd d:\cpolar
 ```batch
 @echo off
 echo 正在启动 AI Agent 服务...
-start "AI Agent" cmd /k "cd /d d:\SecLab\seclab\seclab\ai-agent-service && venv\Scripts\activate && python main.py"
+start "AI Agent" cmd /k "cd /d d:\SecLab\SecLab\seclab-backend\ai-agent-service && venv\Scripts\activate && python main.py"
 echo 正在启动 cpolar 内网穿透...
 start "cpolar" cmd /k "cd /d C:\cpolar && cpolar http 8010"
 echo 服务启动完成！
@@ -290,14 +297,14 @@ pause
 docker ps | findstr mysql
 
 # 导入数据库
-docker exec -i seclab-mysql mysql -uroot -pseclab123 seclab_db < ./数据库文件/init_database.sql
+docker exec -i seclab-mysql mysql -uroot -pseclab123 seclab_db < ./database/sql/init_seclab_db.sql
 ```
 
 #### 4.6.2 导入实验环境数据库
 
 ```bash
 # SQL注入实验数据库
-docker exec -i sqli-lab_db_1 mysql -uroot -p123456 sqli_lab < ./数据库文件/sqli_lab.sql
+docker exec -i sqli-lab_db_1 mysql -uroot -p123456 sqli_lab < ./seclab-backend/sqli-lab/init.sql
 ```
 
 ## 5. 服务访问
@@ -341,7 +348,7 @@ npm run dev
 ### 6.2 后端调试
 
 ```bash
-cd seclab/seclab
+cd seclab-backend
 # 查看服务日志
 docker logs saclab-gateway
 docker logs saclab-user-service
@@ -361,7 +368,7 @@ docker exec -it sqli-lab_db_1 mysql -uroot -p123456
 
 ```bash
 # 停止所有Docker容器
-cd seclab/seclab
+cd seclab-backend
 .\stop-all-services.bat
 
 # 或手动停止

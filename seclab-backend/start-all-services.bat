@@ -140,7 +140,7 @@ echo - Command injection:           http://localhost:8090
 echo - Secure code container:       http://localhost:8080
 echo.
 echo Frontend is not started here. Start it manually:
-echo   cd D:\SecLab\SecLab-FrontEnd-2
+echo   cd D:\SecLab\SecLab\SecLab-FrontEnd-2
 echo   npm run dev
 echo.
 echo Useful checks:

@@ -21,14 +21,11 @@ dist-ssr/
 SecLab-FrontEnd-2/public/video/
 
 # Runtime uploads and generated assets
-seclab/seclab/upload-dir/
+seclab-backend/upload-dir/
 uploads/
 
-# Duplicate exported copies; keep the canonical SQL files in 数据库文件/
+# Duplicate exported copies; keep the canonical SQL files in database/sql/
 seclab/*.sql
-
-# Duplicate lab-container snapshot; keep seclab/seclab/*-lab instead
-项目容器文件/
 
 # Java / Gradle
 build/
@@ -90,6 +87,6 @@ gpt2_model_cache/
 backup/
 
 # local generated files
-seclab/seclab/experiment-module-service/.gradle-user-home/
+seclab-backend/experiment-module-service/.gradle-user-home/
 tmp-selenium/
 tmp-gradle-home/

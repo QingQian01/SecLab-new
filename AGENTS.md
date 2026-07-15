@@ -7,18 +7,18 @@
 - `SecLab-FrontEnd-2/`：前端工程，基于 Vue 3、Vite、TypeScript、Tailwind CSS。
 - `SecLab-FrontEnd-2/src/`：前端核心源码，包含路由、页面、组件、类型、API 封装和实验数据。
 - `SecLab-FrontEnd-2/public/`：前端静态图片资源，保留头像、课程封面、默认图和 logo；`public/video/` 不进入源码仓库。
-- `seclab/seclab/`：后端与靶场主目录，包含微服务工程、AI 辅助服务、Docker/Gradle 配置和靶场源码。
-- `seclab/seclab/gateway/`：网关服务配置与工程目录。
-- `seclab/seclab/eureka/`：服务注册中心配置与工程目录。
-- `seclab/seclab/user-service/`：用户服务目录，和用户资料、班级、人物画像基础数据强相关。
-- `seclab/seclab/experiment-module-service/`：课程、模块、实验相关服务目录。
-- `seclab/seclab/image-service/`：图片、头像、课程图等资源服务目录。
-- `seclab/seclab/docker-service/`：靶场容器管理相关服务目录。
-- `seclab/seclab/ai-agent-service/`：AI 辅助与实验事件分析服务，后续人物画像、学习过程分析可复用这里的事件分析能力。
-- `数据库文件/`：数据库结构和初始化脚本的主副本，包含用户、课程、模块、实验等相关 SQL。
-- `seclab/seclab/sqli-lab/`、`xss-lab/`、`csrf-lab/`、`file-upload-lab/`、`directory-traversal-lab/`、`command-inject/`：主要靶机场景源码目录。
-- `项目容器文件/`：历史/重复的靶场容器文件快照，默认不作为主开发目录；优先维护 `seclab/seclab/` 下的靶场源码。
-- `SecLab系统部署说明文档.md`：系统部署说明。
+- `seclab-backend/`：后端与靶场主目录，包含微服务工程、AI 辅助服务、Docker/Gradle 配置和靶场源码。
+- `seclab-backend/gateway/`：网关服务配置与工程目录。
+- `seclab-backend/eureka/`：服务注册中心配置与工程目录。
+- `seclab-backend/user-service/`：用户服务目录，和用户资料、班级、人物画像基础数据强相关。
+- `seclab-backend/experiment-module-service/`：课程、模块、实验相关服务目录。
+- `seclab-backend/image-service/`：图片、头像、课程图等资源服务目录。
+- `seclab-backend/docker-service/`：靶场容器管理相关服务目录。
+- `seclab-backend/ai-agent-service/`：AI 辅助与实验事件分析服务，后续人物画像、学习过程分析可复用这里的事件分析能力。
+- `database/sql/`：数据库主初始化脚本目录，包含 `init_seclab_db.sql`（业务库）和 `init_seclab_profile.sql`（画像库）等。
+- `shujuku/`：数据库细粒度建表和种子数据脚本目录，包含各事件表、画像表、种子数据的独立 SQL。
+- `seclab-backend/sqli-lab/`、`xss-lab/`、`csrf-lab/`、`file-upload-lab/`、`directory-traversal-lab/`、`command-inject/`：主要靶机场景源码目录。
+- `SecLab网络安全漏洞综合实验平台部署说明文档.md`：系统部署说明。
 
 
 前端：
@@ -35,7 +35,7 @@ npm run vue-tsc
 后端 Gradle 主工程：
 
 ```powershell
-cd seclab/seclab
+cd seclab-backend
 .\gradlew.bat build
 .\gradlew.bat :gateway:build
 .\gradlew.bat :eureka:build
@@ -48,7 +48,7 @@ cd seclab/seclab
 AI 辅助服务：
 
 ```powershell
-cd seclab/seclab/ai-agent-service
+cd seclab-backend/ai-agent-service
 pip install -r requirements.txt
 python main.py
 ```
@@ -56,10 +56,10 @@ python main.py
 Docker/靶场相关：
 
 ```powershell
-cd seclab/seclab
+cd seclab-backend
 docker compose up -d
 
-cd seclab/seclab/sqli-lab
+cd seclab-backend/sqli-lab
 docker compose up -d
 ```
 
@@ -67,7 +67,7 @@ docker compose up -d
 
 数据库：
 
-- 优先维护 `数据库文件/` 下 SQL。
+- 优先维护 `database/sql/` 和 `shujuku/` 下 SQL。
 - 新增或修改表结构时，同步更新初始化脚本和必要说明。
 - 不要只改代码而遗漏建表、字段、索引、默认数据或迁移说明。
 
@@ -97,7 +97,7 @@ docker compose up -d
 - 新表应说明用途、主键、外键或关联字段、关键索引、必要默认值。
 - 新接口应说明 URL、方法、请求参数、响应结构、错误码或错误消息。
 - 新事件类型应说明触发时机、事件字段、落库位置、幂等或重复上报处理方式。
-- 数据库修改要优先落在 `数据库文件/`，并和前后端字段命名保持可追踪映射。
+- 数据库修改要优先落在 `database/sql/`（主初始化脚本）和 `shujuku/`（细粒度建表脚本），并和前后端字段命名保持可追踪映射。
 - 不要在前端硬编码替代真实接口，除非明确是临时 mock，并在任务说明中标出后续替换点。
 
 ## 人物画像开发约束
@@ -119,7 +119,7 @@ docker compose up -d
 
 ## 靶场与安全实验约束
 
-- 靶场源码优先维护 `seclab/seclab/` 下对应场景目录。
+- 靶场源码优先维护 `seclab-backend/` 下对应场景目录。
 - 修改靶场时，保留可运行的 `Dockerfile`、`docker-compose.yml`、`init.sql` 和必要的 `web/`、`files/`、`conf/` 文件。
 - 不要删除已有实验入口、flag 校验、初始化账号或教学提示，除非明确说明替代实现。
 - 涉及容器启动、日志分析、AI 提示时，要关注 `docker-service`、`ai-agent-service` 与前端调用之间的契约。
