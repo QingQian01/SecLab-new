@@ -1,6 +1,6 @@
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -14,6 +14,12 @@ from teacher_ai_analysis_service import (
     generate_teacher_student_ai_analysis,
     validate_class_ai_analysis_payload,
     validate_ai_analysis_payload,
+    validate_teaching_class_analysis_payload,
+    run_manual_student_analysis,
+)
+from teacher_analysis_repository import (
+    TeacherAnalysisProviderError,
+    TeacherStudentAnalysisRepository,
 )
 
 
@@ -71,6 +77,41 @@ def _stream_body(answer=None, *, end_event="message_end", prefix_lines=None):
 
 
 class TeacherAiAnalysisServiceTest(unittest.TestCase):
+    def test_teaching_class_analysis_rejects_question_ids_outside_evidence(self):
+        payload = {
+            "overallComment": "本班在输出上下文判断上存在共性问题。",
+            "commonProblems": [
+                {
+                    "title": "属性上下文判断反复出错",
+                    "evidence": "涉及6名学生、9次错误作答",
+                    "studentCount": 6,
+                    "questionIds": ["gq-not-in-evidence"],
+                    "teacherAction": "下次课先复盘属性上下文，再安排10分钟随堂练习。",
+                }
+            ],
+        }
+
+        with self.assertRaises(ValueError):
+            validate_teaching_class_analysis_payload(payload, {"gq-1", "gq-2"})
+
+    def test_teaching_class_analysis_accepts_evidence_backed_common_problem(self):
+        payload = {
+            "overallComment": "本班在输出上下文判断上存在共性问题。",
+            "commonProblems": [
+                {
+                    "title": "属性上下文判断反复出错",
+                    "evidence": "涉及6名学生、9次错误作答",
+                    "studentCount": 6,
+                    "questionIds": ["gq-1"],
+                    "teacherAction": "下次课先复盘属性上下文，再安排10分钟随堂练习。",
+                }
+            ],
+        }
+
+        result = validate_teaching_class_analysis_payload(payload, {"gq-1", "gq-2"})
+
+        self.assertEqual(result["commonProblems"][0]["questionIds"], ["gq-1"])
+
     def test_build_class_ai_input_uses_class_scope(self):
         class_data = {
             "classId": 232,
@@ -330,6 +371,56 @@ class TeacherAiAnalysisServiceTest(unittest.TestCase):
         self.assertEqual(result["generatedBy"], "llm")
         self.assertFalse(result["fallbackUsed"])
         self.assertEqual(result["focusAreas"][0]["priority"], "high")
+
+class ManualStudentAnalysisTest(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_failure_does_not_return_rule_fallback(self):
+        repository = TeacherStudentAnalysisRepository(memory_store={})
+        current_user = {"user_id": 7, "role": "teacher"}
+        with (
+            patch("teacher_ai_analysis_service.STUDENT_ANALYSIS_REPOSITORY", repository),
+            patch("teacher_ai_analysis_service.require_student_in_owned_teaching_class"),
+            patch(
+                "teacher_ai_analysis_service.get_student_profile_for_teacher",
+                return_value=_profile_data(),
+            ),
+            patch(
+                "teacher_ai_analysis_service._call_dify_for_student_analysis",
+                new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
+            ),
+        ):
+            with self.assertRaises(TeacherAnalysisProviderError):
+                await run_manual_student_analysis(101, 3, current_user=current_user)
+
+        latest = repository.get_latest(7, 101, 3)
+        self.assertEqual("IDLE", latest["analysisStatus"])
+        self.assertIsNone(latest["analysis"])
+
+    async def test_selected_class_is_used_for_student_evidence(self):
+        repository = TeacherStudentAnalysisRepository(memory_store={})
+        current_user = {"user_id": 7, "role": "teacher"}
+        with (
+            patch("teacher_ai_analysis_service.STUDENT_ANALYSIS_REPOSITORY", repository),
+            patch("teacher_ai_analysis_service.require_student_in_owned_teaching_class"),
+            patch(
+                "teacher_ai_analysis_service.get_student_profile_for_teacher",
+                return_value=_profile_data(),
+            ) as profile_loader,
+            patch(
+                "teacher_ai_analysis_service._call_dify_for_student_analysis",
+                new=AsyncMock(return_value=_valid_ai_payload()),
+            ),
+        ):
+            result = await run_manual_student_analysis(101, 3, current_user=current_user)
+
+        profile_loader.assert_called_once_with(
+            3,
+            current_user=current_user,
+            teaching_class_id=101,
+        )
+        self.assertEqual("READY", result["analysisStatus"])
+        self.assertEqual("llm", result["analysis"]["generatedBy"])
+        self.assertFalse(result["analysis"]["fallbackUsed"])
+
 
 class DifyStreamingParserTest(unittest.IsolatedAsyncioTestCase):
     async def test_streaming_single_answer_returns_complete_text(self):
