@@ -11,7 +11,7 @@ import json
 import os
 import time
 import httpx
-from datetime import datetime
+from datetime import date, datetime
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -47,7 +47,18 @@ from single_question_generation_service import (
     generate_single_training_question,
 )
 from standard_question_repository import list_standard_questions, to_jsonable as standard_questions_to_jsonable
-from teacher_ai_analysis_service import generate_teacher_class_ai_analysis, generate_teacher_student_ai_analysis
+from teacher_ai_analysis_service import (
+    generate_teacher_student_ai_analysis,
+    get_latest_student_analysis,
+    get_latest_teaching_class_analysis,
+    run_manual_student_analysis,
+    run_manual_teaching_class_analysis,
+)
+from teacher_analysis_repository import (
+    AnalysisAlreadyRunningError,
+    InsufficientAnalysisDataError,
+    TeacherAnalysisProviderError,
+)
 from training_diagnosis_service import diagnose_training_need
 from training_generation_service import generate_personalized_questions
 from training_submission_service import GeneratedQuestionSubmissionError, submit_generated_question_answer
@@ -65,11 +76,15 @@ from training_repository import (
     save_generated_question_attempt,
 )
 from teacher_repository import (
+    get_generated_question_for_teacher,
     get_student_profile_for_teacher,
     list_class_students as repo_list_teacher_class_students,
     list_generated_questions_for_teacher,
     list_teacher_classes,
+    mark_generated_question_typical,
     read_teacher_dashboard,
+    summarize_generated_questions_for_class,
+    unmark_generated_question_typical,
 )
 
 
@@ -561,6 +576,12 @@ def _teacher_repo_error(exc: Exception) -> HTTPException:
         return exc
     if isinstance(exc, PermissionError):
         return HTTPException(status_code=403, detail="当前账号无权查看该数据。")
+    if isinstance(exc, AnalysisAlreadyRunningError):
+        return HTTPException(status_code=409, detail="该教学班正在分析，请稍后再试。")
+    if isinstance(exc, InsufficientAnalysisDataError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, TeacherAnalysisProviderError):
+        return HTTPException(status_code=503, detail="AI 分析服务暂不可用，已保留上次成功结果。")
     if isinstance(exc, KeyError):
         return HTTPException(status_code=404, detail="请求的数据已不存在或无权访问。")
     if isinstance(exc, ValueError):
@@ -621,7 +642,7 @@ def _load_teacher_auth_context(user_id: int) -> dict[str, Any]:
                     u.user_student_number,
                     u.user_name,
                     COALESCE(u.is_deleted, 0) AS is_deleted,
-                    COALESCE(u.is_admin + 0, 0) AS is_admin
+                    u.user_role
                 FROM `userservice`.`user` u
                 WHERE u.user_id = %(user_id)s
                 LIMIT 1
@@ -636,34 +657,29 @@ def _load_teacher_auth_context(user_id: int) -> dict[str, Any]:
 
             cursor.execute(
                 """
-                SELECT class_id
-                FROM `userservice`.`class`
-                WHERE COALESCE(is_end, 0) = 0 AND admin_id = %(user_id)s
-                ORDER BY class_id ASC
+                SELECT teaching_class_id
+                FROM `userservice`.`teaching_class`
+                WHERE teacher_id = %(user_id)s
+                ORDER BY teaching_class_id
                 """,
                 {"user_id": user_id},
             )
-            managed_class_ids = [
-                int(row["class_id"])
+            owned_teaching_class_ids = [
+                int(row["teaching_class_id"])
                 for row in cursor.fetchall() or []
-                if row.get("class_id") is not None
             ]
 
-    if int(user.get("is_admin") or 0) == 1:
-        role = "admin"
-        scope_class_ids = None
-    elif managed_class_ids:
-        role = "teacher"
-        scope_class_ids = managed_class_ids
-    else:
-        raise HTTPException(status_code=403, detail="Only teacher or admin accounts can access this endpoint")
+    if str(user.get("user_role") or "").upper() != "TEACHER":
+        raise HTTPException(status_code=403, detail="Only teacher accounts can access this endpoint")
 
     return {
         "user_id": int(user["user_id"]),
         "student_number": user.get("user_student_number"),
         "name": user.get("user_name"),
-        "role": role,
-        "scope_class_ids": scope_class_ids,
+        "role": "teacher",
+        # Legacy administrative-class endpoints must not fall back to global access.
+        "scope_class_ids": [],
+        "owned_teaching_class_ids": owned_teaching_class_ids,
     }
 
 
@@ -1648,12 +1664,24 @@ async def teacher_class_students(
 
 
 @app.post("/api/teacher/classes/{class_id}/ai-analysis")
+@app.post("/api/teacher/teaching-classes/{class_id}/ai-analysis")
 async def teacher_class_ai_analysis(
     class_id: int,
     current_user: dict[str, Any] = Depends(require_teacher_user),
 ):
     try:
-        return await generate_teacher_class_ai_analysis(class_id, current_user=current_user)
+        return await run_manual_teaching_class_analysis(class_id, current_user=current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/ai-analysis")
+async def teacher_latest_class_ai_analysis(
+    class_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_latest_teaching_class_analysis(class_id, current_user=current_user)
     except Exception as exc:
         raise _teacher_repo_error(exc)
 
@@ -1665,6 +1693,54 @@ async def teacher_student_profile(
 ):
     try:
         return get_student_profile_for_teacher(user_id, current_user=current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/students/{user_id}/profile")
+async def teacher_teaching_class_student_profile(
+    class_id: int,
+    user_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_student_profile_for_teacher(
+            user_id,
+            current_user=current_user,
+            teaching_class_id=class_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/students/{user_id}/ai-analysis")
+async def teacher_latest_student_ai_analysis(
+    class_id: int,
+    user_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_latest_student_analysis(
+            class_id,
+            user_id,
+            current_user=current_user,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.post("/api/teacher/teaching-classes/{class_id}/students/{user_id}/ai-analysis")
+async def teacher_start_student_ai_analysis(
+    class_id: int,
+    user_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return await run_manual_student_analysis(
+            class_id,
+            user_id,
+            current_user=current_user,
+        )
     except Exception as exc:
         raise _teacher_repo_error(exc)
 
@@ -1684,7 +1760,14 @@ async def teacher_student_profile_ai_analysis(
 @app.get("/api/teacher/dashboard/classes/generated-questions")
 async def teacher_generated_questions(
     teacherId: Optional[int] = Query(default=None),
-    status: Optional[str] = Query(default=None),
+    teachingClassId: Optional[int] = Query(default=None),
+    courseId: Optional[int] = Query(default=None),
+    knowledgePointId: Optional[int] = Query(default=None),
+    studentId: Optional[int] = Query(default=None),
+    answerResult: Optional[str] = Query(default=None),
+    typicalOnly: bool = Query(default=False),
+    dateFrom: Optional[date] = Query(default=None),
+    dateTo: Optional[date] = Query(default=None),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(require_teacher_user),
@@ -1692,9 +1775,65 @@ async def teacher_generated_questions(
     try:
         return list_generated_questions_for_teacher(
             current_user=current_user,
-            status=status,
+            teaching_class_id=teachingClassId,
+            course_id=courseId,
+            knowledge_point_id=knowledgePointId,
+            student_id=studentId,
+            answer_result=answerResult,
+            typical_only=typicalOnly,
+            date_from=dateFrom,
+            date_to=dateTo,
             page=page,
             size=size,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/generated-questions/{generated_question_id}")
+async def teacher_generated_question_detail(
+    generated_question_id: str,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_generated_question_for_teacher(generated_question_id, current_user=current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.put("/api/teacher/generated-questions/{generated_question_id}/typical")
+async def teacher_mark_generated_question_typical(
+    generated_question_id: str,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        get_generated_question_for_teacher(generated_question_id, current_user=current_user)
+        return mark_generated_question_typical(int(current_user["user_id"]), generated_question_id)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.delete("/api/teacher/generated-questions/{generated_question_id}/typical")
+async def teacher_unmark_generated_question_typical(
+    generated_question_id: str,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        get_generated_question_for_teacher(generated_question_id, current_user=current_user)
+        return unmark_generated_question_typical(int(current_user["user_id"]), generated_question_id)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{teaching_class_id}/generated-question-summary")
+async def teacher_generated_question_summary(
+    teaching_class_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return summarize_generated_questions_for_class(
+            teaching_class_id,
+            current_user=current_user,
         )
     except Exception as exc:
         raise _teacher_repo_error(exc)

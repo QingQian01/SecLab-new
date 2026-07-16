@@ -9,7 +9,9 @@ const route = useRoute();
 // 在特定页面不显示悬浮聊天按钮
 const shouldShowChatButton = computed(() => {
   const path = route.path;
-  return !path.includes('/user/chat') && !path.includes('/user/floating-chat-demo');
+  return !path.startsWith('/teacher')
+    && !path.includes('/user/chat')
+    && !path.includes('/user/floating-chat-demo');
 });
 </script>
 

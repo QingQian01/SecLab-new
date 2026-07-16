@@ -1,4 +1,4 @@
-﻿import axios from "axios";
+import axios from "axios";
 import type { RegisterForm } from "./types/auth";
 import { getStoredToken } from "./auth";
 import type { User } from "./types/user";
@@ -26,7 +26,7 @@ const BASE_URL: string = API_BASE_URL;
 const IMAGE_URL = `${BASE_URL}/images/view/`;
 
 type Result<T> = {
-    isSuccess:number,
+    isSuccess?:number,
     status:number,
     message:string,
     data:T
@@ -678,6 +678,166 @@ export interface CourseSummaryDto {
     type: string;
     tags: string[];
     status: string;
+    createdBy?: number | null;
+    creatorEditable?: boolean;
+}
+
+export interface TeachingClassDto {
+    teachingClassId: number;
+    className: string;
+    academicYear: string;
+    semester: 1 | 2;
+    teacherId: number;
+    teacherName?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+    status: "ACTIVE" | "ARCHIVED" | string;
+    studentCount: number;
+    courseCount: number;
+    currentCourse?: string | null;
+    lastActiveAt?: string | null;
+    canManage: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface TeachingClassSavePayload {
+    className: string;
+    academicYear: string;
+    semester: 1 | 2;
+    startDate?: string | null;
+    endDate?: string | null;
+}
+
+export interface TeachingClassStudentDto {
+    studentId: number;
+    studentNumber: string;
+    studentName?: string | null;
+    administrativeClass?: string | null;
+    joinedAt: string;
+    recentActivityAt?: string | null;
+}
+
+export interface TeachingClassCourseDto {
+    courseId: number;
+    courseName: string;
+    courseDescription: string;
+    teachingOrder: number;
+    plannedStartDate?: string | null;
+    plannedEndDate?: string | null;
+    createdBy?: number | null;
+    creatorName?: string | null;
+    updatedAt: string;
+}
+
+export interface TeachingClassImportRowDto {
+    rowNumber: number;
+    studentNumber: string;
+    studentName: string;
+    administrativeClass: string;
+}
+
+export interface TeachingClassImportPreviewDto {
+    batchId: string;
+    newAccounts: TeachingClassImportRowDto[];
+    existingAccounts: TeachingClassImportRowDto[];
+    duplicateRows: Array<{ rowNumber: number; studentNumber: string; firstRowNumber: number }>;
+    errorRows: Array<{ rowNumber: number; message: string }>;
+    expiresAt: string;
+}
+
+export interface TeachingClassImportResultDto {
+    createdAccountCount: number;
+    addedMemberCount: number;
+    skippedMemberCount: number;
+}
+
+export interface TeacherGeneratedQuestionRecord {
+    generatedQuestionId: string;
+    student: { studentId: number; studentNumber?: string | null; studentName: string };
+    teachingClassId: number;
+    teachingClassName: string;
+    courseId?: number | null;
+    courseName?: string | null;
+    knowledgePointId?: number | null;
+    knowledgePointName?: string | null;
+    questionType?: string | null;
+    difficulty?: string | null;
+    title: string;
+    stem: string;
+    options: string[];
+    generationReason?: string | null;
+    standardAnswer?: string | null;
+    referenceAnswer?: string | null;
+    explanation?: string | null;
+    latestAttempt?: {
+        attemptId: string;
+        answer: unknown;
+        isCorrect?: boolean | null;
+        score: number;
+        costTime?: number | null;
+        submittedAt?: string | null;
+    } | null;
+    attemptCount: number;
+    generatedAt?: string | null;
+    isTypical: boolean;
+}
+
+export interface TeacherGeneratedQuestionPage {
+    success: boolean;
+    teacherId: number;
+    items: TeacherGeneratedQuestionRecord[];
+    total: number;
+    page: number;
+    size: number;
+}
+
+export interface TeacherGeneratedQuestionSummary {
+    teachingClassId: number;
+    items: Array<{
+        knowledgePointId?: number | null;
+        knowledgePointName: string;
+        studentCount: number;
+        generatedQuestionCount: number;
+        attemptedCount: number;
+        incorrectCount: number;
+        incorrectRate: number;
+        representativeQuestionIds: string[];
+    }>;
+}
+
+export interface TeachingClassAnalysisDto {
+    teachingClassId: number;
+    analysisStatus: "IDLE" | "RUNNING" | "READY" | string;
+    analysis?: {
+        overallComment?: string;
+        commonProblems?: Array<{
+            title: string;
+            evidence: string;
+            studentCount: number;
+            questionIds: string[];
+            teacherAction: string;
+        }>;
+        teachingSuggestions?: Array<{ title?: string; action?: string; evidenceQuestionIds?: string[] }>;
+        representativeQuestions?: Array<{ generatedQuestionId?: string; reason?: string }>;
+        [key: string]: unknown;
+    } | null;
+    sourceStats?: Record<string, unknown> | null;
+    generatedAt?: string | null;
+    dataCutoffAt?: string | null;
+    lastErrorMessage?: string | null;
+}
+
+export interface TeachingStudentAnalysisDto {
+    teacherId: number;
+    teachingClassId: number;
+    studentId: number;
+    analysisStatus: "IDLE" | "RUNNING" | "READY" | string;
+    analysis?: TeacherStudentAiAnalysisDto | null;
+    sourceStats?: Record<string, unknown> | null;
+    generatedAt?: string | null;
+    dataCutoffAt?: string | null;
+    lastErrorMessage?: string | null;
 }
 
 export interface TeacherUserListItemDto {
@@ -1407,6 +1567,8 @@ export function mapCourseSummaryDtoToAdminCourse(course: CourseSummaryDto): Admi
         studentCount: 0,
         experimentCount: 0,
         createTime: "",
+        createdBy: course.createdBy ?? null,
+        creatorEditable: course.creatorEditable ?? course.createdBy != null,
     };
 }
 
@@ -1806,6 +1968,197 @@ export async function getTeacherGeneratedQuestions(
         params: trustedParams,
         ...getTeacherAgentAuthConfig(),
     });
+    return response.data;
+}
+
+function unwrapTeacherResult<T>(result: Result<T>, fallback: string): T {
+    const succeeded = result.isSuccess === 1
+        || (result.isSuccess === undefined && result.status >= 200 && result.status < 300);
+    if (!succeeded || result.data === undefined || result.data === null) {
+        throw new Error(result.message || fallback);
+    }
+    return result.data;
+}
+
+export async function getTeachingClasses(): Promise<TeachingClassDto[]> {
+    const response = await axios.get<Result<TeachingClassDto[]>>(
+        `${BASE_URL}/api/teacher/teaching-classes`,
+        getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "教学班列表加载失败");
+}
+
+export async function getTeachingClass(teachingClassId: number): Promise<TeachingClassDto> {
+    const response = await axios.get<Result<TeachingClassDto>>(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}`,
+        getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "教学班信息加载失败");
+}
+
+export async function createTeachingClass(payload: TeachingClassSavePayload): Promise<TeachingClassDto> {
+    const response = await axios.post<Result<TeachingClassDto>>(
+        `${BASE_URL}/api/teacher/teaching-classes`, payload, getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "教学班创建失败");
+}
+
+export async function updateTeachingClass(
+    teachingClassId: number,
+    payload: TeachingClassSavePayload,
+): Promise<TeachingClassDto> {
+    const response = await axios.put<Result<TeachingClassDto>>(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}`, payload, getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "教学班保存失败");
+}
+
+export async function archiveTeachingClass(teachingClassId: number): Promise<void> {
+    await axios.delete(`${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}`, getTeacherUserAuthConfig());
+}
+
+export async function getTeachingClassStudents(teachingClassId: number): Promise<TeachingClassStudentDto[]> {
+    const response = await axios.get<Result<TeachingClassStudentDto[]>>(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students`,
+        getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "学生名单加载失败");
+}
+
+export async function previewTeachingClassImport(
+    teachingClassId: number,
+    file: File,
+): Promise<TeachingClassImportPreviewDto> {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await axios.post<Result<TeachingClassImportPreviewDto>>(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/import/preview`,
+        form,
+        getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "名单校验失败");
+}
+
+export async function confirmTeachingClassImport(
+    teachingClassId: number,
+    batchId: string,
+): Promise<TeachingClassImportResultDto> {
+    const response = await axios.post<Result<TeachingClassImportResultDto>>(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/import/${batchId}/confirm`,
+        null,
+        getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "名单导入失败");
+}
+
+export async function removeTeachingClassStudent(teachingClassId: number, studentId: number): Promise<void> {
+    await axios.delete(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}`,
+        getTeacherUserAuthConfig(),
+    );
+}
+
+export async function getTeachingClassCourses(teachingClassId: number): Promise<TeachingClassCourseDto[]> {
+    const response = await axios.get<Result<TeachingClassCourseDto[]>>(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses`,
+        getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "教学安排加载失败");
+}
+
+export async function replaceTeachingClassCourses(
+    teachingClassId: number,
+    items: Array<{ courseId: number; teachingOrder: number; plannedStartDate?: string | null; plannedEndDate?: string | null }>,
+): Promise<TeachingClassCourseDto[]> {
+    const response = await axios.put<Result<TeachingClassCourseDto[]>>(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses`,
+        { items },
+        getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "教学安排保存失败");
+}
+
+export async function getTeacherGeneratedQuestionRecords(params: {
+    teachingClassId?: number;
+    courseId?: number;
+    knowledgePointId?: number;
+    studentId?: number;
+    answerResult?: "correct" | "incorrect" | "attempted" | "unanswered" | "";
+    typicalOnly?: boolean;
+    dateFrom?: string;
+    dateTo?: string;
+    page?: number;
+    size?: number;
+} = {}): Promise<TeacherGeneratedQuestionPage> {
+    const response = await axios.get<TeacherGeneratedQuestionPage>(`${AGENT_BASE_URL}/api/teacher/generated-questions`, {
+        params,
+        ...getTeacherAgentAuthConfig(),
+    });
+    return response.data;
+}
+
+export async function setGeneratedQuestionTypical(generatedQuestionId: string, typical: boolean): Promise<void> {
+    const url = `${AGENT_BASE_URL}/api/teacher/generated-questions/${encodeURIComponent(generatedQuestionId)}/typical`;
+    if (typical) await axios.put(url, null, getTeacherAgentAuthConfig());
+    else await axios.delete(url, getTeacherAgentAuthConfig());
+}
+
+export async function getGeneratedQuestionSummary(teachingClassId: number): Promise<TeacherGeneratedQuestionSummary> {
+    const response = await axios.get<TeacherGeneratedQuestionSummary>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/generated-question-summary`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassAnalysis(teachingClassId: number): Promise<TeachingClassAnalysisDto> {
+    const response = await axios.get<TeachingClassAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/ai-analysis`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function startTeachingClassAnalysis(teachingClassId: number): Promise<TeachingClassAnalysisDto> {
+    const response = await axios.post<TeachingClassAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/ai-analysis`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassStudentProfile(
+    teachingClassId: number,
+    studentId: number,
+): Promise<TeacherStudentProfileResponseDto> {
+    const response = await axios.get<TeacherStudentProfileResponseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}/profile`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassStudentAnalysis(
+    teachingClassId: number,
+    studentId: number,
+): Promise<TeachingStudentAnalysisDto> {
+    const response = await axios.get<TeachingStudentAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}/ai-analysis`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function startTeachingClassStudentAnalysis(
+    teachingClassId: number,
+    studentId: number,
+): Promise<TeachingStudentAnalysisDto> {
+    const response = await axios.post<TeachingStudentAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}/ai-analysis`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
     return response.data;
 }
 

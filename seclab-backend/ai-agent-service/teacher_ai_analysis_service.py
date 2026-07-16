@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 import time
@@ -10,13 +11,29 @@ from typing import Any, Optional
 import httpx
 
 from config import DIFY_API_KEY, DIFY_API_URL
-from teacher_ai_prompts import build_class_ai_analysis_prompt, build_student_ai_analysis_prompt
+from teacher_ai_prompts import (
+    build_class_ai_analysis_prompt,
+    build_student_ai_analysis_prompt,
+    build_teaching_class_analysis_prompt,
+)
+from teacher_analysis_repository import (
+    InsufficientAnalysisDataError,
+    TeacherAnalysisProviderError,
+    TeacherAnalysisRepository,
+    TeacherStudentAnalysisRepository,
+    collect_teaching_class_analysis_evidence,
+    require_teaching_class_owner,
+)
 from teacher_repository import (
     DIMENSION_FIELDS,
     build_rule_based_student_recommendations,
     get_student_profile_for_teacher,
     list_class_students,
+    require_student_in_owned_teaching_class,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 ALLOWED_PRIORITIES = {"high", "medium", "low"}
@@ -404,6 +421,45 @@ def validate_class_ai_analysis_payload(payload: dict[str, Any]) -> dict[str, Any
     }
 
 
+def validate_teaching_class_analysis_payload(
+    payload: dict[str, Any],
+    evidence_question_ids: set[str],
+) -> dict[str, Any]:
+    overall_comment = _require_text(payload, "overallComment")
+    common_problems = payload.get("commonProblems")
+    if not isinstance(common_problems, list) or not common_problems:
+        raise ValueError("commonProblems 不能为空")
+    normalized = []
+    for raw_item in common_problems[:5]:
+        if not isinstance(raw_item, dict):
+            raise ValueError("commonProblems 必须为对象数组")
+        title = _require_text(raw_item, "title")
+        evidence = _require_text(raw_item, "evidence")
+        teacher_action = _require_text(raw_item, "teacherAction")
+        student_count = int(_to_float(raw_item.get("studentCount")))
+        if student_count < 1:
+            raise ValueError("studentCount 必须大于0")
+        question_ids = raw_item.get("questionIds")
+        if not isinstance(question_ids, list) or not question_ids:
+            raise ValueError("questionIds 不能为空")
+        normalized_ids = [str(value).strip() for value in question_ids if str(value).strip()]
+        if not normalized_ids or any(value not in evidence_question_ids for value in normalized_ids):
+            raise ValueError("questionIds 包含证据范围外的题目")
+        normalized.append(
+            {
+                "title": title,
+                "evidence": evidence,
+                "studentCount": student_count,
+                "questionIds": normalized_ids,
+                "teacherAction": teacher_action,
+            }
+        )
+    return {
+        "overallComment": overall_comment,
+        "commonProblems": normalized,
+    }
+
+
 async def _call_dify_for_student_analysis(prompt: str, user_id: Any) -> dict[str, Any]:
     if not DIFY_API_URL or not DIFY_API_KEY:
         raise RuntimeError("Dify API is not configured")
@@ -467,3 +523,143 @@ async def generate_teacher_class_ai_analysis(
         return result
     except Exception:
         return build_class_rule_fallback_analysis(class_data, generated_at=generated_at)
+
+
+TEACHER_ANALYSIS_REPOSITORY = TeacherAnalysisRepository()
+STUDENT_ANALYSIS_REPOSITORY = TeacherStudentAnalysisRepository()
+
+
+def get_latest_teaching_class_analysis(
+    teaching_class_id: int,
+    current_user: dict[str, Any],
+) -> dict[str, Any]:
+    require_teaching_class_owner(
+        teaching_class_id,
+        int(current_user.get("user_id") or 0),
+    )
+    return TEACHER_ANALYSIS_REPOSITORY.get_latest(teaching_class_id)
+
+
+async def run_manual_teaching_class_analysis(
+    teaching_class_id: int,
+    current_user: dict[str, Any],
+) -> dict[str, Any]:
+    teacher_id = int(current_user.get("user_id") or 0)
+    require_teaching_class_owner(teaching_class_id, teacher_id)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None)
+    TEACHER_ANALYSIS_REPOSITORY.begin(teaching_class_id, teacher_id, cutoff)
+    try:
+        evidence = collect_teaching_class_analysis_evidence(teaching_class_id)
+        prompt = build_teaching_class_analysis_prompt(json.dumps(evidence, ensure_ascii=False))
+        payload = await _call_dify_for_student_analysis(prompt, f"teaching-class-{teaching_class_id}")
+        result = validate_teaching_class_analysis_payload(
+            payload,
+            set(evidence.get("evidenceQuestionIds") or []),
+        )
+        TEACHER_ANALYSIS_REPOSITORY.save_success(
+            teaching_class_id,
+            teacher_id,
+            cutoff,
+            result,
+            evidence,
+        )
+        return TEACHER_ANALYSIS_REPOSITORY.get_latest(teaching_class_id)
+    except InsufficientAnalysisDataError as exc:
+        TEACHER_ANALYSIS_REPOSITORY.save_failure(teaching_class_id, str(exc))
+        raise
+    except Exception as exc:
+        TEACHER_ANALYSIS_REPOSITORY.save_failure(teaching_class_id, "AI 服务暂不可用")
+        raise TeacherAnalysisProviderError("AI analysis provider failed") from exc
+
+
+def get_latest_student_analysis(
+    teaching_class_id: int,
+    student_id: int,
+    current_user: dict[str, Any],
+) -> dict[str, Any]:
+    teacher_id = int(current_user.get("user_id") or 0)
+    require_student_in_owned_teaching_class(teacher_id, teaching_class_id, student_id)
+    return STUDENT_ANALYSIS_REPOSITORY.get_latest(teacher_id, teaching_class_id, student_id)
+
+
+async def run_manual_student_analysis(
+    teaching_class_id: int,
+    student_id: int,
+    current_user: dict[str, Any],
+) -> dict[str, Any]:
+    teacher_id = int(current_user.get("user_id") or 0)
+    require_student_in_owned_teaching_class(teacher_id, teaching_class_id, student_id)
+    logger.info(
+        "teacher=%s started student analysis teaching_class=%s student=%s",
+        teacher_id,
+        teaching_class_id,
+        student_id,
+    )
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None)
+    STUDENT_ANALYSIS_REPOSITORY.begin(teacher_id, teaching_class_id, student_id, cutoff)
+    try:
+        profile_data = get_student_profile_for_teacher(
+            student_id,
+            current_user=current_user,
+            teaching_class_id=teaching_class_id,
+        )
+        if not (
+            profile_data.get("latestProfile")
+            or profile_data.get("recentAttempts")
+            or profile_data.get("personalSignals")
+        ):
+            raise InsufficientAnalysisDataError("该学生暂无可用于分析的学习记录")
+        evidence = build_student_ai_input(profile_data)
+        prompt = build_student_ai_analysis_prompt(json.dumps(evidence, ensure_ascii=False))
+        payload = await _call_dify_for_student_analysis(
+            prompt,
+            f"teaching-class-{teaching_class_id}-student-{student_id}",
+        )
+        result = validate_ai_analysis_payload(payload)
+        STUDENT_ANALYSIS_REPOSITORY.save_success(
+            teacher_id,
+            teaching_class_id,
+            student_id,
+            cutoff,
+            result,
+            evidence,
+        )
+        logger.info(
+            "teacher=%s completed student analysis teaching_class=%s student=%s",
+            teacher_id,
+            teaching_class_id,
+            student_id,
+        )
+        return STUDENT_ANALYSIS_REPOSITORY.get_latest(
+            teacher_id,
+            teaching_class_id,
+            student_id,
+        )
+    except InsufficientAnalysisDataError as exc:
+        STUDENT_ANALYSIS_REPOSITORY.save_failure(
+            teacher_id,
+            teaching_class_id,
+            student_id,
+            str(exc),
+        )
+        logger.info(
+            "teacher=%s student analysis lacked evidence teaching_class=%s student=%s",
+            teacher_id,
+            teaching_class_id,
+            student_id,
+        )
+        raise
+    except Exception as exc:
+        STUDENT_ANALYSIS_REPOSITORY.save_failure(
+            teacher_id,
+            teaching_class_id,
+            student_id,
+            "AI 服务暂不可用",
+        )
+        logger.warning(
+            "teacher=%s student analysis failed teaching_class=%s student=%s",
+            teacher_id,
+            teaching_class_id,
+            student_id,
+        )
+        raise TeacherAnalysisProviderError("AI analysis provider failed") from exc

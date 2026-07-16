@@ -1,10 +1,10 @@
-﻿import { createRouter, createWebHashHistory } from "vue-router";
+import { createRouter, createWebHashHistory } from "vue-router";
 import { getUserInfo } from "../api";
 import { clearStoredAuthSession, getStoredToken, isPrivilegedRole, normalizeCurrentUser, storeAuthSession } from "../auth";
 import { isLabRunning } from "../composables/useLabState";
 
 const UserLayout = () => import("../layout/User/index.vue");
-const AdminLayout = () => import("../layout/Admin/index.vue");
+const TeacherLayout = () => import("../layout/Teacher/index.vue");
 const Courses = () => import("../pages/User/Courses/index.vue");
 const Welcome = () => import("../pages/WelCome/index.vue");
 const Course = () => import("../pages/User/Course/index.vue");
@@ -14,17 +14,14 @@ const Modules = () => import("../pages/User/Modules/index.vue");
 const Profile = () => import("../pages/User/Profile/index.vue");
 const Community = () => import("../pages/User/Community/index.vue");
 const Access = () => import("../pages/Access/index.vue");
-const UserManage = () => import("../pages/Admin/Users/index.vue");
-const CourseManage = () => import("../pages/Admin/Courses/index.vue");
-const LabManage = () => import("../pages/Admin/Labs/index.vue");
 const MockTarget = () => import("../mock/MockTarget.vue");
-const DashBoard = () => import("../pages/Admin/DashBoard/index.vue");
-const ClassProfile = () => import("../pages/Admin/ClassProfile/index.vue");
-const GeneratedQuestions = () => import("../pages/Admin/GeneratedQuestions/index.vue");
+const TeacherOverview = () => import("../pages/Teacher/Overview/index.vue");
+const TeachingClasses = () => import("../pages/Teacher/TeachingClasses/index.vue");
+const TeacherTeachingAnalysis = () => import("../pages/Teacher/TeachingAnalysis/index.vue");
+const TeacherCourseLibrary = () => import("../pages/Teacher/CourseLibrary/index.vue");
+const TeacherGeneratedQuestions = () => import("../pages/Teacher/GeneratedQuestions/index.vue");
 const Chat = () => import("../pages/User/Chat/index.vue");
 const FloatingChatDemo = () => import("../pages/User/Chat/FloatingChatDemo.vue");
-const CourseCreate = () => import("../pages/Admin/Courses/create/create.vue");
-const AdminStudentProfile = () => import("../pages/Admin/StudentProfile/index.vue");
 const ModuleTest = () => import("../pages/User/Module/test.vue");
 const XssTest = () => import("../pages/User/Module/xss-test.vue");
 const CommandTest = () => import("../pages/User/Module/command-test.vue");
@@ -113,56 +110,18 @@ export const router = createRouter({
             ]
         },
         {
-            path: "/admin",
-            component: AdminLayout,
+            path: "/teacher",
+            component: TeacherLayout,
             children: [
-                {
-                    path: "",
-                    redirect: "/admin/dashboard"
-                },
-                // 在admin路径下
-                {
-                    path: "course/create",
-                    component: CourseCreate
-                },
-                {
-                    path: "course/:id/edit",
-                    component: CourseCreate
-                },
-                {
-                    path: "welcome",
-                    component: Welcome
-                },
-                {
-                    path: "user",
-                    component: UserManage
-                },
-                {
-                    path: "course",
-                    component: CourseManage
-                },
-                {
-                    path: "lab",
-                    component: LabManage
-                },
-                {
-                    path: "class-profile",
-                    component: ClassProfile
-                },
-                {
-                    path: "generated-questions",
-                    component: GeneratedQuestions
-                },
-                {
-                    path: "student-profile/:id",
-                    component: AdminStudentProfile
-                },
-                {
-                    path: "dashboard",
-                    component: DashBoard
-                }
-            ]
+                { path: "", redirect: "/teacher/overview" },
+                { path: "overview", component: TeacherOverview },
+                { path: "classes", component: TeachingClasses },
+                { path: "analysis", component: TeacherTeachingAnalysis },
+                { path: "courses", component: TeacherCourseLibrary },
+                { path: "generated-questions", component: TeacherGeneratedQuestions },
+            ],
         },
+        { path: "/admin/:pathMatch(.*)*", redirect: "/teacher/overview" },
         {
             path: "",
             component: Access
@@ -194,7 +153,7 @@ router.beforeEach((to) => {
         }
     }
 
-    const isProtectedRoute = to.path.startsWith("/admin") || to.path.startsWith("/user");
+    const isProtectedRoute = to.path.startsWith("/teacher") || to.path.startsWith("/admin") || to.path.startsWith("/user");
     if (!isProtectedRoute) {
         return true;
     }
@@ -220,7 +179,7 @@ router.beforeEach((to) => {
 
             storeAuthSession(token, currentUser);
 
-            if (!to.path.startsWith("/admin")) {
+            if (!to.path.startsWith("/teacher") && !to.path.startsWith("/admin")) {
                 return true;
             }
 

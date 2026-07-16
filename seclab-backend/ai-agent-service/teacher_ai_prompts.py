@@ -69,3 +69,34 @@ def build_class_ai_analysis_prompt(class_profile_json: str) -> str:
     }}
   ]
 }}"""
+
+
+def build_teaching_class_analysis_prompt(evidence_json: str) -> str:
+    return f"""你是网络安全实验教学平台的教师端教学分析助手。
+
+请只根据输入中的当前教学班证据，总结最值得教师在课堂中处理的共性问题。
+
+要求：
+1. 不得编造学生人数、错误次数、课程、知识点或题目编号。
+2. questionIds 只能从 evidenceQuestionIds 中选择，必须指向已经存在的学生端 AI 生成题。
+3. 每个共性问题必须说明证据、涉及学生数和可直接执行的课堂教学动作。
+4. 不输出学生姓名、学号或个人干预建议。
+5. 输出严格 JSON，不要 Markdown，不要解释性前后缀。
+6. 如果证据不足以支持某个结论，就不要输出该结论。
+
+当前证据：
+{evidence_json}
+
+输出 JSON 格式：
+{{
+  "overallComment": "本班当前最需要处理的问题",
+  "commonProblems": [
+    {{
+      "title": "引号闭合判断反复出错",
+      "evidence": "涉及 11 名学生、19 次错误作答",
+      "studentCount": 11,
+      "questionIds": ["gq-1024"],
+      "teacherAction": "下次课先复盘闭合判断，再安排 10 分钟随堂练习"
+    }}
+  ]
+}}"""
