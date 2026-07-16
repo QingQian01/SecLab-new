@@ -28,6 +28,7 @@ import {
   type WeakKnowledgePoint
 } from '../../../api'
 import { showToast, useCookie } from '../../../common'
+import TeacherAssignments from './TeacherAssignments.vue'
 
 type SolveRecord = ProfileDashboardResponse['solveRecords'][number]
 type LoginStorageUser = Partial<User> & {
@@ -1344,6 +1345,18 @@ async function hydrateTrainingQuestions(trainingSessionId: string) {
   trainingQuestions.value = (response.questions || []).map(buildTrainingQuestionState)
 }
 
+async function openTeacherAssignmentSession(trainingSessionId: string) {
+  if (!trainingSessionId) return
+  try {
+    activeTrainingSessionId.value = trainingSessionId
+    await hydrateTrainingQuestions(trainingSessionId)
+    showTrainingView.value = true
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  } catch (error) {
+    showToast(extractErrorMessage(error, '教师布置的训练加载失败，请稍后重试。'))
+  }
+}
+
 function generateRequestId() {
   return `training-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
@@ -1624,6 +1637,8 @@ onMounted(() => {
         <i class="fas fa-triangle-exclamation"></i>
         <span>{{ pageNotice }}</span>
       </div>
+
+      <TeacherAssignments :user-id="currentUserId" @open-session="openTeacherAssignmentSession" />
 
       <div
         class="card bg-base-100 shadow-xl backdrop-blur-sm border border-base-200 transition-all duration-500 overflow-hidden"
