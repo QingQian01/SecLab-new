@@ -10,12 +10,17 @@ const cors = readFileSync(
   resolve(root, '../seclab-backend/user-service/src/main/kotlin/me/myot233/seclab/userservice/config/CorsConfig.kt'),
   'utf8',
 )
+const gatewayCors = readFileSync(
+  resolve(root, '../seclab-backend/gateway/src/main/resources/application.yml'),
+  'utf8',
+)
 
 assert.match(api, /teachingContent\?: string \| null/)
 assert.match(api, /export async function updateTeachingClassCourseContent/)
 assert.match(api, /axios\.patch<Result<TeachingClassCourseDto>>/)
 assert.match(api, /courses\/\$\{courseId\}\/content/)
 assert.match(cors, /allowedMethods\([^)]*"PATCH"/)
+assert.match(gatewayCors, /allowedMethods:[\s\S]*?- PATCH[\s\S]*?allowedHeaders:/)
 
 assert.match(page, /updateTeachingClassCourseContent/)
 assert.match(page, /const openTeachingContentEditor =/)
