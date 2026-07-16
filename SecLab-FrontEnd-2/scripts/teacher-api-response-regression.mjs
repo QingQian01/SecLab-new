@@ -3,7 +3,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 
 const apiSource = fs.readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
-const match = apiSource.match(/function unwrapTeacherResult<[\s\S]*?\n}\n/)
+const match = apiSource.match(/function unwrapTeacherResult<[\s\S]*?\r?\n}\r?\n/)
 
 if (!match) {
   throw new Error('unwrapTeacherResult implementation was not found')
