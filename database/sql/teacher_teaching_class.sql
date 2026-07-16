@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS `userservice`.`teaching_class_course` (
   `teaching_order` INT NOT NULL,
   `planned_start_date` DATE NULL,
   `planned_end_date` DATE NULL,
+  `teaching_content` TEXT NULL,
   `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
     ON UPDATE CURRENT_TIMESTAMP(6),
@@ -178,6 +179,20 @@ CREATE TABLE IF NOT EXISTS `userservice`.`teaching_class_course` (
       OR `planned_end_date` >= `planned_start_date`
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET @sql := IF(
+  EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'userservice'
+      AND table_name = 'teaching_class_course'
+      AND column_name = 'teaching_content'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `userservice`.`teaching_class_course` ADD COLUMN `teaching_content` TEXT NULL AFTER `planned_end_date`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS `userservice`.`teaching_class_import_batch` (
   `import_batch_id` CHAR(36) NOT NULL,

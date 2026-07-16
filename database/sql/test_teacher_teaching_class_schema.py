@@ -45,6 +45,26 @@ class TeacherTeachingClassSchemaTest(unittest.TestCase):
         ):
             self.assert_has_table("userservice", table)
 
+    def test_teaching_class_course_stores_teacher_written_content(self) -> None:
+        self.assertIn("`teaching_content` TEXT NULL", self.sql)
+
+        runtime_sql = USER_SERVICE_INIT.read_text(encoding="utf-8")
+        self.assertIn("`teaching_content` TEXT NULL", runtime_sql)
+        self.assertRegex(
+            self.sql,
+            re.compile(
+                r"ADD\s+COLUMN\s+`teaching_content`\s+TEXT\s+NULL",
+                re.IGNORECASE,
+            ),
+        )
+        self.assertRegex(
+            runtime_sql,
+            re.compile(
+                r"ADD\s+COLUMN\s+`teaching_content`\s+TEXT\s+NULL",
+                re.IGNORECASE,
+            ),
+        )
+
     def test_defines_teacher_profile_tables(self) -> None:
         self.assert_has_table("seclab_profile", "teacher_typical_question")
         self.assert_has_table("seclab_profile", "teacher_class_analysis")

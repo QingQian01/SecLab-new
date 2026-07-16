@@ -6,6 +6,7 @@ import me.myot233.seclab.userservice.dto.TeachingClassResponse
 import me.myot233.seclab.userservice.dto.TeachingClassImportConfirmResult
 import me.myot233.seclab.userservice.dto.TeachingClassImportPreview
 import me.myot233.seclab.userservice.dto.TeachingClassCourseResponse
+import me.myot233.seclab.userservice.dto.TeachingClassCourseContentUpdateRequest
 import me.myot233.seclab.userservice.dto.TeachingClassCourseUpdateRequest
 import me.myot233.seclab.userservice.dto.TeachingClassSaveRequest
 import me.myot233.seclab.userservice.dto.TeachingClassStudentResponse
@@ -15,6 +16,7 @@ import me.myot233.seclab.userservice.service.TeacherTeachingClassService
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -177,6 +179,21 @@ class TeacherTeachingClassController(
         return ApiResponse.success(
             teachingClassService.replaceCourses(teacher.userId ?: 0, teachingClassId, request),
             "教学安排已保存",
+        )
+    }
+
+    @PatchMapping("/{teachingClassId}/courses/{courseId}/content")
+    fun updateCourseContent(
+        @PathVariable teachingClassId: Long,
+        @PathVariable courseId: Int,
+        @Valid @RequestBody request: TeachingClassCourseContentUpdateRequest,
+        @RequestParam(required = false) token: String?,
+        @RequestHeader(name = "Authorization", required = false) authorization: String?,
+    ): ApiResponse<TeachingClassCourseResponse> {
+        val teacher = currentUserService.requireTeacher(token, authorization)
+        return ApiResponse.success(
+            teachingClassService.updateCourseContent(teacher.userId ?: 0, teachingClassId, courseId, request),
+            "教学内容已保存",
         )
     }
 }

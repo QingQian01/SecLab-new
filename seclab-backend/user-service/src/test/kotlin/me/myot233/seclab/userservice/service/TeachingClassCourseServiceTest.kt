@@ -1,7 +1,9 @@
 package me.myot233.seclab.userservice.service
 
 import me.myot233.seclab.userservice.dto.TeachingClassCourseItemRequest
+import me.myot233.seclab.userservice.dto.TeachingClassCourseContentUpdateRequest
 import me.myot233.seclab.userservice.dto.TeachingClassCourseUpdateRequest
+import me.myot233.seclab.userservice.entity.TeachingClassCourseEntity
 import me.myot233.seclab.userservice.entity.TeachingClassEntity
 import me.myot233.seclab.userservice.exception.ApiException
 import me.myot233.seclab.userservice.repository.TeachingClassCourseRepository
@@ -13,7 +15,9 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyList
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
+import org.mockito.ArgumentCaptor
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.Optional
@@ -80,16 +84,88 @@ class TeachingClassCourseServiceTest {
         assertEquals(400, error.status)
     }
 
+    @Test
+    fun `teacher can write teaching content for one arranged course`() {
+        `when`(teachingClassRepository.findById(101)).thenReturn(
+            Optional.of(TeachingClassEntity(teachingClassId = 101, teacherId = 7)),
+        )
+        `when`(courseRepository.findByTeachingClassIdAndCourseId(101, 1)).thenReturn(
+            Optional.of(TeachingClassCourseEntity(teachingClassId = 101, courseId = 1)),
+        )
+        `when`(courseRepository.findCourseViews(101)).thenReturn(
+            listOf(
+                courseView(
+                    1,
+                    "SQL注入攻防",
+                    1,
+                    "2026-09-01",
+                    "2026-09-14",
+                    "讲解参数化查询并完成靶场练习",
+                ),
+            ),
+        )
+
+        val result = service.updateCourseContent(
+            teacherId = 7,
+            teachingClassId = 101,
+            courseId = 1,
+            request = TeachingClassCourseContentUpdateRequest("  讲解参数化查询并完成靶场练习  "),
+        )
+
+        val captor = ArgumentCaptor.forClass(TeachingClassCourseEntity::class.java)
+        verify(courseRepository).saveAndFlush(captor.capture())
+        assertEquals("讲解参数化查询并完成靶场练习", captor.value.teachingContent)
+        assertEquals("讲解参数化查询并完成靶场练习", result.teachingContent)
+    }
+
+    @Test
+    fun `reordering courses keeps teacher written teaching content`() {
+        `when`(teachingClassRepository.findById(101)).thenReturn(
+            Optional.of(TeachingClassEntity(teachingClassId = 101, teacherId = 7)),
+        )
+        `when`(courseRepository.findExistingCourseIds(listOf(1))).thenReturn(listOf(1))
+        `when`(courseRepository.findAllByTeachingClassId(101)).thenReturn(
+            listOf(
+                TeachingClassCourseEntity(
+                    teachingClassId = 101,
+                    courseId = 1,
+                    teachingContent = "保留本班已有教学内容",
+                ),
+            ),
+        )
+        var savedContent: String? = null
+        `when`(courseRepository.saveAll(anyList())).thenAnswer { invocation ->
+            val saved = invocation.arguments[0] as List<*>
+            savedContent = (saved.single() as TeachingClassCourseEntity).teachingContent
+            saved
+        }
+        `when`(courseRepository.findCourseViews(101)).thenReturn(
+            listOf(courseView(1, "SQL注入攻防", 1, "2026-09-01", "2026-09-14", "保留本班已有教学内容")),
+        )
+
+        service.replaceCourses(
+            teacherId = 7,
+            teachingClassId = 101,
+            TeachingClassCourseUpdateRequest(
+                listOf(TeachingClassCourseItemRequest(1, 1, date("2026-09-01"), date("2026-09-14"))),
+            ),
+        )
+
+        assertEquals("保留本班已有教学内容", savedContent)
+    }
+
     private fun courseView(
         courseId: Int,
         courseName: String,
         order: Int,
         start: String,
         end: String,
+        teachingContent: String? = null,
     ) = object : TeachingClassCourseView {
         override fun getCourseId() = courseId
         override fun getCourseName() = courseName
         override fun getCourseDescription() = ""
+        override fun getTeachingContent() = teachingContent
         override fun getTeachingOrder() = order
         override fun getPlannedStartDate() = date(start)
         override fun getPlannedEndDate() = date(end)

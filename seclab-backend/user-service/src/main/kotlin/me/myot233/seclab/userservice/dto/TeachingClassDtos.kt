@@ -96,10 +96,16 @@ data class TeachingClassCourseUpdateRequest(
     val items: List<TeachingClassCourseItemRequest>,
 )
 
+data class TeachingClassCourseContentUpdateRequest(
+    @field:Size(max = 2000, message = "教学内容不能超过2000个字符")
+    val teachingContent: String? = null,
+)
+
 data class TeachingClassCourseResponse(
     val courseId: Int,
     val courseName: String,
     val courseDescription: String,
+    val teachingContent: String?,
     val teachingOrder: Int,
     val plannedStartDate: LocalDate?,
     val plannedEndDate: LocalDate?,
