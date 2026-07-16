@@ -294,5 +294,5 @@ export function isPrivilegedRole(role: AuthRole | null): boolean {
 }
 
 export function getHomeRouteForRole(role: AuthRole | null): string {
-    return isPrivilegedRole(role) ? "/admin/dashboard" : "/user/profile";
+    return isPrivilegedRole(role) ? "/teacher/overview" : "/user/profile";
 }
