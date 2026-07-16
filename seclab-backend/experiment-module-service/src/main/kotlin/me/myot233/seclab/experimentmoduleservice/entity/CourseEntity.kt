@@ -21,6 +21,8 @@ class CourseEntity(
     val imageUrl: String? = null,
     @field:Column(name = "instructor")
     val instructor: String? = null,
+    @field:Column(name = "created_by")
+    val createdBy: Long? = null,
     @field:Column(name = "course_status")
     val courseStatus: Int? = null,
     @field:Column(name = "tags")

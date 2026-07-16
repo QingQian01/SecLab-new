@@ -16,6 +16,8 @@ data class CourseSummaryDto(
     val teacherName: String? = null,
     val category: String? = type,
     val createTime: String? = null,
+    val createdBy: Long? = null,
+    val creatorEditable: Boolean = createdBy != null,
 )
 
 data class ModuleOverviewDto(

@@ -35,8 +35,8 @@ class CourseController(
         @RequestBody request: CourseMutationRequest,
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ApiResponse<CourseSummaryDto> {
-        catalogAuthService.requireTeacherOrAdmin(authorization)
-        return ApiResponse.success(catalogQueryService.createCourse(request), "课程创建成功")
+        val currentUser = catalogAuthService.requireTeacherOrAdmin(authorization)
+        return ApiResponse.success(catalogQueryService.createCourse(currentUser.userId, request), "课程创建成功")
     }
 
     @PutMapping("/{id}")
@@ -45,8 +45,8 @@ class CourseController(
         @RequestBody request: CourseMutationRequest,
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ApiResponse<CourseSummaryDto> {
-        catalogAuthService.requireTeacherOrAdmin(authorization)
-        return ApiResponse.success(catalogQueryService.updateCourse(id, request), "课程更新成功")
+        val currentUser = catalogAuthService.requireTeacherOrAdmin(authorization)
+        return ApiResponse.success(catalogQueryService.updateCourse(currentUser.userId, id, request), "课程更新成功")
     }
 
     @DeleteMapping("/{id}")
@@ -54,8 +54,8 @@ class CourseController(
         @PathVariable id: Int,
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ApiResponse<Unit> {
-        catalogAuthService.requireTeacherOrAdmin(authorization)
-        catalogQueryService.deleteCourse(id)
+        val currentUser = catalogAuthService.requireTeacherOrAdmin(authorization)
+        catalogQueryService.deleteCourse(currentUser.userId, id)
         return ApiResponse.success(Unit, "课程删除成功")
     }
 
@@ -69,9 +69,9 @@ class CourseController(
         @PathVariable moduleId: Int,
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ApiResponse<List<ModuleOverviewDto>> {
-        catalogAuthService.requireTeacherOrAdmin(authorization)
+        val currentUser = catalogAuthService.requireTeacherOrAdmin(authorization)
         return ApiResponse.success(
-            catalogQueryService.addModuleToCourse(courseId, moduleId),
+            catalogQueryService.addModuleToCourse(currentUser.userId, courseId, moduleId),
             "实验已添加到课程",
         )
     }
@@ -82,9 +82,9 @@ class CourseController(
         @PathVariable moduleId: Int,
         @RequestHeader(name = "Authorization", required = false) authorization: String?,
     ): ApiResponse<List<ModuleOverviewDto>> {
-        catalogAuthService.requireTeacherOrAdmin(authorization)
+        val currentUser = catalogAuthService.requireTeacherOrAdmin(authorization)
         return ApiResponse.success(
-            catalogQueryService.removeModuleFromCourse(courseId, moduleId),
+            catalogQueryService.removeModuleFromCourse(currentUser.userId, courseId, moduleId),
             "实验已从课程移除",
         )
     }
