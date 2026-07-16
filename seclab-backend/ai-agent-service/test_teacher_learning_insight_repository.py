@@ -84,6 +84,34 @@ class TeacherLearningInsightHelpersTest(unittest.TestCase):
         self.assertEqual(result[1]["summary"], "能根据错误调整步骤")
         self.assertTrue(all(item["evidence"] for item in result))
 
+    def test_dimension_summary_extracts_teacher_facing_explanation_from_detail_object(self):
+        profile = {
+            "troubleshooting_score": 92,
+            "profile_summary_json": {
+                "dimension_explanations": {
+                    "troubleshooting_score": {
+                        "stats": {"error_count": 2},
+                        "explanation": "能够根据报错调整方案，并在修复后主动复测。",
+                    }
+                }
+            },
+        }
+
+        result = insights.build_capability_dimensions(profile, [])
+
+        self.assertEqual(result[1]["summary"], "能够根据报错调整方案，并在修复后主动复测。")
+        self.assertNotIn("error_count", result[1]["summary"])
+
+    def test_display_text_rejects_question_mark_only_legacy_data(self):
+        self.assertEqual(
+            insights.normalize_display_text("????????????", "暂无有效说明"),
+            "暂无有效说明",
+        )
+        self.assertEqual(
+            insights.normalize_display_text("已完成 SQL 盲注验证", "暂无有效说明"),
+            "已完成 SQL 盲注验证",
+        )
+
     def test_risk_thresholds_require_enough_students_for_rate_only_risk(self):
         self.assertEqual(insights.classify_risk(12, 8, 0.67), "high")
         self.assertEqual(insights.classify_risk(10, 4, 0.4), "medium")

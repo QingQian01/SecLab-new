@@ -1,3 +1,4 @@
+SET NAMES utf8mb4;
 USE `seclab_profile`;
 
 -- Idempotent showcase evidence for the imported 网络安全232班 students.

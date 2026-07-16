@@ -18,6 +18,20 @@ DIMENSIONS = (
     ("engagement", "学习投入", "engagement_score", {"LAB_START", "ATTEMPT", "SUCCESS", "COMMAND"}),
 )
 
+LEGACY_MOJIBAKE_MARKERS = re.compile(r"[ÃÂæåçèéÖÑÄÊ£¡µÎÏ½]|�")
+
+
+def normalize_display_text(value: Any, fallback: str = "") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    visible = re.sub(r"[\s\W_]", "", text, flags=re.UNICODE)
+    if not visible or set(visible) == {"?"}:
+        return fallback
+    if LEGACY_MOJIBAKE_MARKERS.search(text) and not re.search(r"[\u4e00-\u9fff]", text):
+        return fallback
+    return text
+
 
 def classify_risk(attempted_student_count: int, incorrect_student_count: int, incorrect_rate: float) -> str:
     if incorrect_student_count >= 8 or (attempted_student_count >= 5 and incorrect_rate >= 0.55):
@@ -101,8 +115,8 @@ def _timeline_item(
         "kind": kind,
         "occurredAt": _iso(occurred_at),
         "sourceId": str(source_id or ""),
-        "title": title,
-        "detail": str(detail or "")[:500],
+        "title": normalize_display_text(title, "学习事件"),
+        "detail": normalize_display_text(detail, "")[:500],
         "status": status,
         "labSessionId": lab_session_id,
         "moduleId": module_id,
@@ -251,12 +265,18 @@ def build_capability_dimensions(
     dimensions = []
     for key, label, score_field, event_kinds in DIMENSIONS:
         evidence = [item for item in reversed(timeline) if item.get("kind") in event_kinds][:6]
+        explanation = explanations.get(score_field)
+        if isinstance(explanation, dict):
+            explanation = explanation.get("explanation") or explanation.get("summary")
         dimensions.append(
             {
                 "key": key,
                 "label": label,
                 "score": float(profile[score_field]) if profile.get(score_field) is not None else None,
-                "summary": str(explanations.get(score_field) or "该维度根据当前可追溯学习证据计算。"),
+                "summary": normalize_display_text(
+                    explanation,
+                    "该维度根据当前可追溯学习证据计算。",
+                ),
                 "evidence": evidence or fallback_evidence,
             }
         )
