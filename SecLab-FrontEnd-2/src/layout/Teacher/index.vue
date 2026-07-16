@@ -81,7 +81,13 @@ const logout = () => {
   --teacher-pale: #f5f7fa;
 }
 
-.teacher-shell { min-height: 100vh; background: var(--teacher-pale); color: var(--teacher-ink); }
+.teacher-shell {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--teacher-pale);
+  color: var(--teacher-ink);
+}
 .teacher-nav { position: fixed; inset: 0 auto 0 0; z-index: 40; display: flex; width: 238px; flex-direction: column; border-right: 1px solid var(--teacher-line); background: #fff; }
 .brand { display: flex; align-items: center; gap: 11px; height: 82px; padding: 0 24px; border-bottom: 1px solid #eef1f5; }
 .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; color: #fff; background: #1e4fa1; font-size: 18px; font-weight: 800; }
@@ -101,7 +107,14 @@ const logout = () => {
 .account-copy strong { font-size: 13px; }
 .account-copy span { color: #8b97a8; font-size: 11px; }
 .nav-account button { border: 0; background: none; color: #7b8798; font-size: 12px; cursor: pointer; }
-.teacher-main { min-height: 100vh; margin-left: 238px; overflow: auto; }
+.teacher-main {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  margin-left: 238px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
 .mobile-menu, .nav-backdrop { display: none; }
 
 @media (max-width: 820px) {
