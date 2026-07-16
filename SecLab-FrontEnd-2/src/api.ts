@@ -722,6 +722,7 @@ export interface TeachingClassCourseDto {
     courseId: number;
     courseName: string;
     courseDescription: string;
+    teachingContent?: string | null;
     teachingOrder: number;
     plannedStartDate?: string | null;
     plannedEndDate?: string | null;
@@ -2076,6 +2077,19 @@ export async function replaceTeachingClassCourses(
         getTeacherUserAuthConfig(),
     );
     return unwrapTeacherResult(response.data, "教学安排保存失败");
+}
+
+export async function updateTeachingClassCourseContent(
+    teachingClassId: number,
+    courseId: number,
+    teachingContent: string | null,
+): Promise<TeachingClassCourseDto> {
+    const response = await axios.patch<Result<TeachingClassCourseDto>>(
+        `${BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}/content`,
+        { teachingContent },
+        getTeacherUserAuthConfig(),
+    );
+    return unwrapTeacherResult(response.data, "教学内容保存失败");
 }
 
 export async function getTeacherGeneratedQuestionRecords(params: {

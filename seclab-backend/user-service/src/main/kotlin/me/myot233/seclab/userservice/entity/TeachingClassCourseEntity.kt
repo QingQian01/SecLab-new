@@ -32,6 +32,9 @@ open class TeachingClassCourseEntity(
     @field:Column(name = "planned_end_date")
     open var plannedEndDate: LocalDate? = null,
 
+    @field:Column(name = "teaching_content", columnDefinition = "TEXT")
+    open var teachingContent: String? = null,
+
     @field:Column(name = "created_at", nullable = false)
     open var createdAt: LocalDateTime = LocalDateTime.now(),
 

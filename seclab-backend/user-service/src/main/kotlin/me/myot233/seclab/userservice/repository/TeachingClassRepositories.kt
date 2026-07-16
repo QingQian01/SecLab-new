@@ -104,6 +104,10 @@ interface TeachingClassStudentView {
 interface TeachingClassCourseRepository : JpaRepository<TeachingClassCourseEntity, Long> {
     fun countByTeachingClassId(teachingClassId: Long): Long
 
+    fun findAllByTeachingClassId(teachingClassId: Long): List<TeachingClassCourseEntity>
+
+    fun findByTeachingClassIdAndCourseId(teachingClassId: Long, courseId: Int): Optional<TeachingClassCourseEntity>
+
     @Query(
         value = """
             SELECT c.course_name
@@ -133,6 +137,7 @@ interface TeachingClassCourseRepository : JpaRepository<TeachingClassCourseEntit
             SELECT tcc.course_id AS courseId,
                    c.course_name AS courseName,
                    c.course_description AS courseDescription,
+                   tcc.teaching_content AS teachingContent,
                    tcc.teaching_order AS teachingOrder,
                    tcc.planned_start_date AS plannedStartDate,
                    tcc.planned_end_date AS plannedEndDate,
@@ -158,6 +163,7 @@ interface TeachingClassCourseView {
     fun getCourseId(): Int
     fun getCourseName(): String
     fun getCourseDescription(): String
+    fun getTeachingContent(): String?
     fun getTeachingOrder(): Int
     fun getPlannedStartDate(): LocalDate?
     fun getPlannedEndDate(): LocalDate?

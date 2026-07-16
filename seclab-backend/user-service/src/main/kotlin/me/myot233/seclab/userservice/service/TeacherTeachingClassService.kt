@@ -1,6 +1,7 @@
 package me.myot233.seclab.userservice.service
 
 import me.myot233.seclab.userservice.dto.TeachingClassResponse
+import me.myot233.seclab.userservice.dto.TeachingClassCourseContentUpdateRequest
 import me.myot233.seclab.userservice.dto.TeachingClassCourseResponse
 import me.myot233.seclab.userservice.dto.TeachingClassCourseUpdateRequest
 import me.myot233.seclab.userservice.dto.TeachingClassSaveRequest
@@ -112,6 +113,29 @@ class TeacherTeachingClassService(
     }
 
     @Transactional
+    fun updateCourseContent(
+        teacherId: Long,
+        teachingClassId: Long,
+        courseId: Int,
+        request: TeachingClassCourseContentUpdateRequest,
+    ): TeachingClassCourseResponse {
+        val teachingClass = requireOwner(teacherId, teachingClassId)
+        if (teachingClass.status == TeachingClassStatus.ARCHIVED) {
+            throw conflict("已归档教学班不能修改教学内容")
+        }
+        val arrangement = courseRepository.findByTeachingClassIdAndCourseId(teachingClassId, courseId).orElseThrow {
+            ApiException(404, "该课程不在当前教学安排中", HttpStatus.NOT_FOUND)
+        }
+        arrangement.teachingContent = normalizeTeachingContent(request.teachingContent)
+        courseRepository.saveAndFlush(arrangement)
+        log.info("teacher={} updated teaching content for teachingClass={} course={}", teacherId, teachingClassId, courseId)
+        return courseRepository.findCourseViews(teachingClassId)
+            .firstOrNull { it.getCourseId() == courseId }
+            ?.toResponse()
+            ?: throw ApiException(404, "教学安排不存在", HttpStatus.NOT_FOUND)
+    }
+
+    @Transactional
     fun replaceCourses(
         teacherId: Long,
         teachingClassId: Long,
@@ -141,6 +165,8 @@ class TeacherTeachingClassService(
             }
         }
 
+        val existingTeachingContent = courseRepository.findAllByTeachingClassId(teachingClassId)
+            .associate { it.courseId to it.teachingContent }
         courseRepository.deleteArrangements(teachingClassId)
         courseRepository.flush()
         if (request.items.isNotEmpty()) {
@@ -152,6 +178,7 @@ class TeacherTeachingClassService(
                         teachingOrder = item.teachingOrder,
                         plannedStartDate = item.plannedStartDate,
                         plannedEndDate = item.plannedEndDate,
+                        teachingContent = existingTeachingContent[item.courseId],
                     )
                 },
             )
@@ -222,11 +249,20 @@ class TeacherTeachingClassService(
         }
     }
 
+    private fun normalizeTeachingContent(content: String?): String? {
+        val normalized = content?.trim()?.takeIf { it.isNotEmpty() }
+        if (normalized != null && normalized.length > MAX_TEACHING_CONTENT_LENGTH) {
+            throw ApiException(400, "教学内容不能超过2000个字符")
+        }
+        return normalized
+    }
+
     private fun me.myot233.seclab.userservice.repository.TeachingClassCourseView.toResponse() =
         TeachingClassCourseResponse(
             courseId = getCourseId(),
             courseName = getCourseName(),
             courseDescription = getCourseDescription(),
+            teachingContent = getTeachingContent(),
             teachingOrder = getTeachingOrder(),
             plannedStartDate = getPlannedStartDate(),
             plannedEndDate = getPlannedEndDate(),
@@ -266,5 +302,6 @@ class TeacherTeachingClassService(
         val log = LoggerFactory.getLogger(TeacherTeachingClassService::class.java)
         val ACADEMIC_YEAR_REGEX = Regex("^(\\d{4})-(\\d{4})$")
         const val MAX_COURSES_PER_CLASS = 50
+        const val MAX_TEACHING_CONTENT_LENGTH = 2000
     }
 }

@@ -12,6 +12,7 @@ import {
   previewTeachingClassImport,
   removeTeachingClassStudent,
   replaceTeachingClassCourses,
+  updateTeachingClassCourseContent,
   updateTeachingClass,
   type TeachingClassCourseDto,
   type TeachingClassDto,
@@ -45,6 +46,10 @@ const importing = ref(false)
 const showCourseModal = ref(false)
 const coursePlans = ref<CoursePlan[]>([])
 const savingCourses = ref(false)
+const showTeachingContentModal = ref(false)
+const editingCourseContent = ref<TeachingClassCourseDto | null>(null)
+const teachingContentForm = ref('')
+const savingTeachingContent = ref(false)
 
 const activeClasses = computed(() => classes.value.filter((item) => item.status !== 'ARCHIVED'))
 const selectedCourseIds = computed(() => new Set(coursePlans.value.map((item) => item.courseId)))
@@ -214,6 +219,33 @@ const saveCoursePlan = async () => {
   finally { savingCourses.value = false }
 }
 
+const openTeachingContentEditor = (course: TeachingClassCourseDto) => {
+  if (!selected.value?.canManage) return
+  editingCourseContent.value = course
+  teachingContentForm.value = course.teachingContent || ''
+  showTeachingContentModal.value = true
+}
+
+const saveTeachingContent = async () => {
+  if (!selected.value || !editingCourseContent.value) return
+  savingTeachingContent.value = true
+  try {
+    const saved = await updateTeachingClassCourseContent(
+      selected.value.teachingClassId,
+      editingCourseContent.value.courseId,
+      teachingContentForm.value.trim() || null,
+    )
+    const index = arrangedCourses.value.findIndex((item) => item.courseId === saved.courseId)
+    if (index >= 0) arrangedCourses.value[index] = saved
+    showTeachingContentModal.value = false
+    notice.value = '教学内容已保存，只影响当前教学班。'
+  } catch (err) {
+    notice.value = getApiErrorMessage(err, '教学内容保存失败，请稍后重试。')
+  } finally {
+    savingTeachingContent.value = false
+  }
+}
+
 onMounted(() => void load())
 </script>
 
@@ -267,7 +299,15 @@ onMounted(() => void load())
           <div class="detail-toolbar"><div><strong>教学安排</strong><span>课程可跨学期复用，这里只安排本教学班的授课顺序</span></div><button v-if="selected.canManage" class="primary-button" @click="openCoursePlan">调整课程</button></div>
           <div v-if="arrangedCourses.length" class="course-list">
             <div v-for="(course, index) in arrangedCourses" :key="course.courseId" class="course-row">
-              <span class="course-order">{{ index + 1 }}</span><div><strong>{{ course.courseName }}</strong><p>{{ course.courseDescription || '暂无课程说明' }}</p><small>{{ course.plannedStartDate || '未设置开始日期' }}<template v-if="course.plannedEndDate"> 至 {{ course.plannedEndDate }}</template></small></div>
+              <span class="course-order">{{ index + 1 }}</span>
+              <div class="course-main">
+                <div class="course-title-line">
+                  <strong>{{ course.courseName }}</strong>
+                  <button v-if="selected.canManage" type="button" class="course-content-edit" @click="openTeachingContentEditor(course)">编辑内容</button>
+                </div>
+                <p>{{ course.teachingContent || course.courseDescription || '暂无教学内容' }}</p>
+                <small>{{ course.plannedStartDate || '未设置开始日期' }}<template v-if="course.plannedEndDate"> 至 {{ course.plannedEndDate }}</template></small>
+              </div>
             </div>
           </div>
           <div v-else class="empty-state"><strong>还没有安排课程</strong>从课程库中选择本学期要讲授的课程。</div>
@@ -307,6 +347,19 @@ onMounted(() => void load())
         <div v-if="!coursePlans.length" class="empty-state compact">从上方选择课程</div>
       </div><div class="modal-actions"><button class="secondary-button" @click="showCourseModal = false">取消</button><button class="primary-button" :disabled="savingCourses" @click="saveCoursePlan">{{ savingCourses ? '保存中…' : '保存安排' }}</button></div>
     </div></div>
+
+    <div v-if="showTeachingContentModal" class="modal-layer" @click.self="showTeachingContentModal = false"><div class="modal-card content-modal">
+      <div class="modal-head"><h2>编写教学内容</h2><button type="button" @click="showTeachingContentModal = false">×</button></div>
+      <div class="modal-body">
+        <div class="content-course-name">{{ editingCourseContent?.courseName }}</div>
+        <div class="field">
+          <label>本班教学内容</label>
+          <textarea v-model="teachingContentForm" maxlength="2000" rows="7" placeholder="填写这节课在当前教学班要讲授的具体内容、重点或实践安排"></textarea>
+          <small>{{ teachingContentForm.length }} / 2000；留空将显示课程库简介</small>
+        </div>
+      </div>
+      <div class="modal-actions"><button type="button" class="secondary-button" @click="showTeachingContentModal = false">取消</button><button type="button" class="primary-button" :disabled="savingTeachingContent" @click="saveTeachingContent">{{ savingTeachingContent ? '保存中…' : '保存内容' }}</button></div>
+    </div></div>
   </div>
 </template>
 
@@ -334,6 +387,10 @@ onMounted(() => void load())
 .row-action.danger { color: #b54942; }
 .course-list { padding: 0 22px 12px; }
 .course-row { display: flex; gap: 14px; padding: 16px 0; border-top: 1px solid #edf1f5; }
+.course-main { min-width: 0; flex: 1; }
+.course-title-line { display: flex; align-items: center; gap: 10px; }
+.course-content-edit { padding: 2px 7px; border: 1px solid #cddbf0; border-radius: 5px; background: #fff; color: #2864b8; font-size: 11px; cursor: pointer; }
+.course-content-edit:hover { border-color: #8eadd7; background: #f4f8fd; }
 .course-order { display: grid; width: 27px; height: 27px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #edf3fb; color: #285da7; font-size: 11px; font-weight: 700; }
 .course-row p { max-width: 700px; margin: 4px 0; color: #7c899a; font-size: 12px; line-height: 1.5; }
 .course-row small { color: #55779f; }
@@ -342,6 +399,10 @@ onMounted(() => void load())
 .preview-stats div { display: grid; gap: 3px; padding: 12px; border-right: 1px solid #e7ecf2; text-align: center; }
 .preview-stats div:last-child { border: 0; }.preview-stats strong { color: #1e579e; font-size: 19px; }.preview-stats span { color: #8290a4; font-size: 10px; }.preview-stats .bad strong { color: #b42318; }
 .course-modal { width: min(720px, 100%); }.plan-row { padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; }.plan-top { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; }.plan-top > span { color: #2862ad; font-size: 11px; font-weight: 700; }.plan-top strong { flex: 1; font-size: 13px; }.plan-top button { border: 0; background: #f0f3f7; color: #5b687b; cursor: pointer; }.plan-top button.remove { background: none; color: #ad443d; font-size: 11px; }
+.content-modal { width: min(620px, 100%); }
+.content-course-name { margin-bottom: 14px; color: #21334e; font-size: 15px; font-weight: 700; }
+.content-modal textarea { min-height: 150px; resize: vertical; line-height: 1.6; }
+.content-modal .field small { color: #8793a5; text-align: right; }
 @media (max-width: 980px) { .classes-layout { grid-template-columns: 1fr; } .class-list { display: grid; grid-template-columns: repeat(2, 1fr); } .list-caption { grid-column: 1 / -1; } }
 @media (max-width: 620px) { .class-list { grid-template-columns: 1fr; } .detail-title, .detail-toolbar { align-items: flex-start; flex-direction: column; } .form-grid, .preview-stats { grid-template-columns: 1fr; } .preview-stats div { border-right: 0; border-bottom: 1px solid #e7ecf2; } }
 </style>
