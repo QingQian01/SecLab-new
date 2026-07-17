@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildRiskHeatmap,
   findMatchingRiskItem,
   getRiskPresentation,
   getTimelineEventPresentation,
@@ -51,5 +52,31 @@ describe('teaching analysis presentation', () => {
 
     expect(matched?.knowledgePointName).toBe('XSS 与 CSRF 攻击')
     expect(matched?.affectedStudents[0].studentName).toBe('陈宇航')
+  })
+
+  it('builds a real knowledge-point by student error heatmap', () => {
+    const model = buildRiskHeatmap([
+      {
+        knowledgePointName: 'XSS 输入输出上下文判断',
+        riskLevel: 'medium',
+        incorrectRate: 0.4,
+        affectedStudents: [
+          { studentId: 261, studentName: '陈宇航' },
+          { studentId: 263, studentName: '王子睿' },
+        ],
+      },
+      {
+        knowledgePointName: 'SQL 联合查询列数判断',
+        riskLevel: 'high',
+        incorrectRate: 0.6,
+        affectedStudents: [{ studentId: 263, studentName: '王子睿' }],
+      },
+    ])
+
+    expect(model.students.map((student) => student.studentName)).toEqual(['陈宇航', '王子睿'])
+    expect(model.rows[0].errorRatePercent).toBe(40)
+    expect(model.rows[0].cells.map((cell) => cell.hasError)).toEqual([true, true])
+    expect(model.rows[1].cells.map((cell) => cell.hasError)).toEqual([false, true])
+    expect(model.rows[1].cells[1].tone).toBe('high')
   })
 })
