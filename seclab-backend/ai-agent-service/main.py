@@ -87,6 +87,11 @@ from teacher_repository import (
     unmark_generated_question_typical,
 )
 from teacher_profile_service import rebuild_teaching_class_profiles
+from teacher_course_analysis_service import (
+    collect_course_question_records,
+    get_course_analysis,
+    run_course_analysis,
+)
 from teacher_learning_insight_repository import (
     get_capability_evidence,
     get_class_risk_map,
@@ -2092,6 +2097,81 @@ async def teacher_generated_questions(
             page=page,
             size=size,
         )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/courses/{course_id}/questions")
+async def teacher_class_course_questions(
+    class_id: int,
+    course_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return collect_course_question_records(class_id, course_id, current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/courses/{course_id}/students/{student_id}/questions")
+async def teacher_student_course_questions(
+    class_id: int,
+    course_id: int,
+    student_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return collect_course_question_records(class_id, course_id, current_user, student_id)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/courses/{course_id}/ai-analysis")
+async def teacher_latest_class_course_analysis(
+    class_id: int,
+    course_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_course_analysis(class_id, course_id, current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.post("/api/teacher/teaching-classes/{class_id}/courses/{course_id}/ai-analysis")
+async def teacher_start_class_course_analysis(
+    class_id: int,
+    course_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return await run_course_analysis(class_id, course_id, current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/courses/{course_id}/students/{student_id}/ai-analysis")
+async def teacher_latest_student_course_analysis(
+    class_id: int,
+    course_id: int,
+    student_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_course_analysis(class_id, course_id, current_user, student_id)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.post("/api/teacher/teaching-classes/{class_id}/courses/{course_id}/students/{student_id}/ai-analysis")
+async def teacher_start_student_course_analysis(
+    class_id: int,
+    course_id: int,
+    student_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return await run_course_analysis(class_id, course_id, current_user, student_id)
     except Exception as exc:
         raise _teacher_repo_error(exc)
 

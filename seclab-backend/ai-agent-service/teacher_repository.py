@@ -949,6 +949,7 @@ def map_generated_question_record(row: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "generatedQuestionId": row.get("generated_question_id"),
+        "trainingSessionId": row.get("training_session_id"),
         "student": {
             "studentId": _to_int(row.get("user_id")),
             "studentNumber": row.get("user_student_number"),

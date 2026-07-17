@@ -762,6 +762,7 @@ export interface TeachingClassImportResultDto {
 
 export interface TeacherGeneratedQuestionRecord {
     generatedQuestionId: string;
+    trainingSessionId?: string | null;
     student: { studentId: number; studentNumber?: string | null; studentName: string };
     teachingClassId: number;
     teachingClassName: string;
@@ -789,6 +790,97 @@ export interface TeacherGeneratedQuestionRecord {
     attemptCount: number;
     generatedAt?: string | null;
     isTypical: boolean;
+    attemptHistory?: TeacherQuestionAttemptDto[];
+}
+
+export interface TeacherQuestionAttemptDto {
+    attemptId: string;
+    answer: unknown;
+    isCorrect?: boolean | null;
+    score: number;
+    costTime?: number | null;
+    submittedAt?: string | null;
+}
+
+export interface TeacherCourseQuestionSummaryDto {
+    studentCount: number;
+    questionCount: number;
+    attemptedQuestionCount: number;
+    attemptCount: number;
+    correctQuestionCount: number;
+    incorrectQuestionCount: number;
+    accuracyRate: number;
+    averageScore: number;
+    students: Array<{
+        studentId: number;
+        studentName: string;
+        studentNumber?: string | null;
+        questionCount: number;
+        attemptCount: number;
+        correctQuestionCount: number;
+        incorrectQuestionCount: number;
+        accuracyRate: number;
+    }>;
+    knowledgePoints: Array<{
+        knowledgePointName: string;
+        questionCount: number;
+        attemptCount: number;
+        correctQuestionCount: number;
+        incorrectQuestionCount: number;
+        affectedStudentCount: number;
+        accuracyRate: number;
+    }>;
+}
+
+export interface TeacherCourseQuestionsDto {
+    success: boolean;
+    teachingClassId: number;
+    course: { courseId: number; courseName: string };
+    studentId?: number | null;
+    items: TeacherGeneratedQuestionRecord[];
+    summary: TeacherCourseQuestionSummaryDto;
+}
+
+export interface TeacherCourseAnalysisDto {
+    teacherId: number;
+    teachingClassId: number;
+    courseId: number;
+    scope: "CLASS" | "STUDENT" | string;
+    studentId?: number | null;
+    analysisStatus: "IDLE" | "RUNNING" | "READY" | "FAILED" | string;
+    analysis?: {
+        scope: "class_course" | "student_course" | string;
+        courseId: number;
+        courseName: string;
+        generatedBy: string;
+        fallbackUsed: boolean;
+        providerMessage?: string | null;
+        generatedAt?: string | null;
+        overallComment: string;
+        summary?: TeacherCourseQuestionSummaryDto;
+        knowledgeFindings?: Array<{
+            knowledgePointName: string;
+            evidence?: string;
+            teacherAction?: string;
+            incorrectQuestionCount?: number;
+            affectedStudentCount?: number;
+            accuracyRate?: number;
+        }>;
+        representativeMistakes?: Array<{
+            generatedQuestionId: string;
+            title: string;
+            studentName?: string | null;
+            knowledgePointName?: string | null;
+            latestAnswer?: unknown;
+            standardAnswer?: unknown;
+            score?: number | null;
+        }>;
+        teachingSuggestions?: string[];
+        [key: string]: unknown;
+    } | null;
+    sourceStats?: TeacherCourseQuestionSummaryDto | null;
+    lastErrorMessage?: string | null;
+    generatedAt?: string | null;
 }
 
 export interface TeacherGeneratedQuestionPage {
@@ -2252,6 +2344,56 @@ export async function setGeneratedQuestionTypical(generatedQuestionId: string, t
 export async function getGeneratedQuestionSummary(teachingClassId: number): Promise<TeacherGeneratedQuestionSummary> {
     const response = await axios.get<TeacherGeneratedQuestionSummary>(
         `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/generated-question-summary`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeacherClassCourseQuestions(
+    teachingClassId: number,
+    courseId: number,
+): Promise<TeacherCourseQuestionsDto> {
+    const response = await axios.get<TeacherCourseQuestionsDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}/questions`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeacherStudentCourseQuestions(
+    teachingClassId: number,
+    courseId: number,
+    studentId: number,
+): Promise<TeacherCourseQuestionsDto> {
+    const response = await axios.get<TeacherCourseQuestionsDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}/students/${studentId}/questions`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeacherCourseAnalysis(
+    teachingClassId: number,
+    courseId: number,
+    studentId?: number | null,
+): Promise<TeacherCourseAnalysisDto> {
+    const suffix = studentId ? `/students/${studentId}` : '';
+    const response = await axios.get<TeacherCourseAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}${suffix}/ai-analysis`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function startTeacherCourseAnalysis(
+    teachingClassId: number,
+    courseId: number,
+    studentId?: number | null,
+): Promise<TeacherCourseAnalysisDto> {
+    const suffix = studentId ? `/students/${studentId}` : '';
+    const response = await axios.post<TeacherCourseAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}${suffix}/ai-analysis`,
+        null,
         getTeacherAgentAuthConfig(),
     );
     return response.data;
