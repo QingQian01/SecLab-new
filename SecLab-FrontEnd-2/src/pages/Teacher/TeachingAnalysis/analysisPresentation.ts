@@ -29,3 +29,42 @@ export function getTimelineEventPresentation(
 export function normalizeEvidenceCount(value?: number | null): number {
   return Math.max(0, Number.isFinite(Number(value)) ? Number(value) : 0)
 }
+
+interface ClassProblemLike {
+  title?: string
+  evidence?: string
+  questionIds?: string[]
+}
+
+interface RiskItemLike {
+  courseName: string
+  knowledgePointName: string
+  knowledgeCategory: string
+  representativeQuestions: Array<{ generatedQuestionId: string }>
+}
+
+function searchable(value?: string | null): string {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '')
+}
+
+export function findMatchingRiskItem<T extends RiskItemLike>(
+  problem: ClassProblemLike,
+  risks: T[],
+): T | null {
+  const problemText = searchable(`${problem.title || ''}${problem.evidence || ''}`)
+  const questionIds = new Set((problem.questionIds || []).map(String))
+  let best: { item: T; score: number } | null = null
+
+  for (const item of risks) {
+    let score = item.representativeQuestions.reduce(
+      (total, question) => total + (questionIds.has(String(question.generatedQuestionId)) ? 10 : 0),
+      0,
+    )
+    for (const label of [item.knowledgePointName, item.knowledgeCategory, item.courseName]) {
+      const token = searchable(label)
+      if (token.length >= 2 && (problemText.includes(token) || token.includes(problemText))) score += 3
+    }
+    if (score > 0 && (!best || score > best.score)) best = { item, score }
+  }
+  return best?.item || null
+}

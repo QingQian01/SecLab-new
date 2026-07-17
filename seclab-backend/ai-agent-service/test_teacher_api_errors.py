@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
 import main
+from teacher_ai_analysis_service import provider_failure_message
 
 
 class TeacherApiErrorTest(unittest.TestCase):
@@ -122,6 +123,22 @@ class AiAnalysisHealthTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["configured"], True)
         self.assertEqual(result["providerReachable"], False)
         self.assertEqual(result["message"], "Dify 已配置，但当前无法连接。")
+
+
+class AiAnalysisProviderFailureTest(unittest.TestCase):
+    def test_timeout_is_reported_as_generation_timeout_not_missing_configuration(self):
+        message = provider_failure_message(TimeoutError("stream stalled"))
+
+        self.assertIn("已连接", message)
+        self.assertIn("生成超时", message)
+        self.assertIn("额度", message)
+
+    def test_rate_limit_is_reported_as_quota_or_rate_limit(self):
+        request = httpx.Request("POST", "https://api.dify.example/v1/chat-messages")
+        response = httpx.Response(429, request=request)
+        message = provider_failure_message(httpx.HTTPStatusError("rate limited", request=request, response=response))
+
+        self.assertIn("额度或调用频率", message)
 
 
 class _FakeCursor:

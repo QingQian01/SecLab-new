@@ -57,6 +57,34 @@ VAGUE_ADVICE_PATTERNS = (
 STREAM_END_EVENTS = {"message_end", "agent_message_end", "workflow_finished"}
 
 
+def provider_failure_message(exc: Exception) -> str:
+    """Return a safe, teacher-facing reason without leaking provider details."""
+    chain: list[BaseException] = []
+    current: Optional[BaseException] = exc
+    while current is not None and current not in chain:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+
+    for item in chain:
+        if isinstance(item, httpx.HTTPStatusError):
+            status_code = item.response.status_code
+            if status_code in {401, 403}:
+                return "Dify 鉴权失败，请检查应用 API Key 是否仍然有效。"
+            if status_code == 429:
+                return "Dify 模型额度或调用频率已受限，请检查模型供应商余额和限流设置。"
+            if status_code >= 500:
+                return "Dify 已连接，但上游模型服务暂时异常，请稍后重试。"
+
+    combined = " ".join(str(item).lower() for item in chain)
+    if any(isinstance(item, (TimeoutError, httpx.TimeoutException)) for item in chain):
+        return "Dify 应用已连接，但模型生成超时；请检查 Dify Agent 的模型供应商、额度和工具配置。"
+    if any(keyword in combined for keyword in ("quota", "rate limit", "rate_limit", "insufficient balance")):
+        return "Dify 模型额度或调用频率已受限，请检查模型供应商余额和限流设置。"
+    if any(keyword in combined for keyword in ("not valid structured", "不是有效结构化", "不能为空", "必须为")):
+        return "Dify 已返回内容，但结果格式不符合教学分析要求，请检查 Agent 提示词和输出格式。"
+    return "Dify 已连接，但本次模型生成失败；请检查 Dify Agent 的模型供应商和运行日志。"
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -569,7 +597,14 @@ async def run_manual_teaching_class_analysis(
         raise
     except Exception as exc:
         TEACHER_ANALYSIS_REPOSITORY.save_failure(teaching_class_id, "AI 服务暂不可用")
-        raise TeacherAnalysisProviderError("AI analysis provider failed") from exc
+        logger.warning(
+            "teacher=%s class analysis failed teaching_class=%s reason=%s",
+            teacher_id,
+            teaching_class_id,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        raise TeacherAnalysisProviderError(provider_failure_message(exc)) from exc
 
 
 def get_latest_student_analysis(
@@ -657,9 +692,11 @@ async def run_manual_student_analysis(
             "AI 服务暂不可用",
         )
         logger.warning(
-            "teacher=%s student analysis failed teaching_class=%s student=%s",
+            "teacher=%s student analysis failed teaching_class=%s student=%s reason=%s",
             teacher_id,
             teaching_class_id,
             student_id,
+            type(exc).__name__,
+            exc_info=True,
         )
-        raise TeacherAnalysisProviderError("AI analysis provider failed") from exc
+        raise TeacherAnalysisProviderError(provider_failure_message(exc)) from exc
