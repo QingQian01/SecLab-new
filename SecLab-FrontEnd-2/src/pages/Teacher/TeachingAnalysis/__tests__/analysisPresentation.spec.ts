@@ -1,11 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildKnowledgeRiskPie,
   buildRiskHeatmap,
+  classifyKnowledgeRisk,
   findMatchingRiskItem,
   getRiskPresentation,
   getTimelineEventPresentation,
   normalizeEvidenceCount,
 } from '../analysisPresentation'
+
+function pieRisk(overrides: Record<string, unknown> = {}) {
+  return {
+    courseId: 7,
+    courseName: 'SQL 注入攻击',
+    knowledgePointName: '联合查询列数判断',
+    knowledgeCategory: 'SQL 注入',
+    riskLevel: 'attention',
+    incorrectRate: 0.25,
+    attemptedCount: 8,
+    incorrectCount: 2,
+    affectedStudents: [],
+    ...overrides,
+  }
+}
 
 describe('teaching analysis presentation', () => {
   it('maps risk levels to stable teacher-facing labels', () => {
@@ -78,5 +95,37 @@ describe('teaching analysis presentation', () => {
     expect(model.rows[0].cells.map((cell) => cell.hasError)).toEqual([true, true])
     expect(model.rows[1].cells.map((cell) => cell.hasError)).toEqual([false, true])
     expect(model.rows[1].cells[1].tone).toBe('high')
+  })
+
+  it('keeps same-colour knowledge points as independent pie slices', () => {
+    const result = buildKnowledgeRiskPie([
+      pieRisk({ knowledgePointId: 1, knowledgePointName: '列数判断', incorrectCount: 2, attemptedCount: 8, incorrectRate: 0.25 }),
+      pieRisk({ knowledgePointId: 2, knowledgePointName: '回显位判断', incorrectCount: 3, attemptedCount: 10, incorrectRate: 0.30 }),
+    ], 7)
+
+    expect(result.slices).toHaveLength(2)
+    expect(result.slices.map((item) => item.key)).toEqual(['1-列数判断', '2-回显位判断'])
+    expect(result.slices.map((item) => item.tone)).toEqual(['attention', 'attention'])
+    expect(result.slices.map((item) => item.sharePercent)).toEqual([40, 60])
+    expect(result.slices.reduce((total, item) => total + item.sharePercent, 0)).toBe(100)
+  })
+
+  it('scopes pie data to the selected experiment and separates zero-error mastery', () => {
+    const result = buildKnowledgeRiskPie([
+      pieRisk({ knowledgePointId: 1, incorrectCount: 2 }),
+      pieRisk({ knowledgePointId: 2, incorrectCount: 0, incorrectRate: 0 }),
+      pieRisk({ courseId: 8, knowledgePointId: 3, incorrectCount: 9, incorrectRate: 0.9 }),
+    ], 7)
+
+    expect(result.totalIncorrect).toBe(2)
+    expect(result.slices.map((item) => item.item.knowledgePointId)).toEqual([1])
+    expect(result.mastered.map((item) => item.knowledgePointId)).toEqual([2])
+  })
+
+  it('uses red orange yellow and green thresholds from each point error rate', () => {
+    expect(classifyKnowledgeRisk(0.60).tone).toBe('high')
+    expect(classifyKnowledgeRisk(0.40).tone).toBe('medium')
+    expect(classifyKnowledgeRisk(0.20).tone).toBe('attention')
+    expect(classifyKnowledgeRisk(0.1999).tone).toBe('good')
   })
 })

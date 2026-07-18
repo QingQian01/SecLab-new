@@ -42,13 +42,13 @@ function formatTime(value?: string | null) {
 <template>
   <section class="course-records">
     <div class="records-head">
-      <div><h2>{{ scopeLabel }}全部做题情况</h2><p>按当前课程展示真实题目、答案和每一次重做记录。</p></div>
+      <div><h2>{{ scopeLabel }}本实验全部做题情况</h2><p>按当前实验展示真实题目、答案和每一次重做记录。</p></div>
       <div class="filter-tabs" aria-label="作答结果筛选">
         <button v-for="item in [['all','全部'],['incorrect','错题'],['correct','答对'],['unanswered','未作答']]" :key="item[0]" :class="{ active: answerFilter === item[0] }" @click="answerFilter = item[0] as typeof answerFilter">{{ item[1] }}</button>
       </div>
     </div>
-    <div v-if="loading" class="records-empty">正在读取课程作答记录…</div>
-    <div v-else-if="!data?.items.length" class="records-empty"><strong>这门课程还没有做题记录</strong><span>题目生成并提交后，会自动按课程汇总到这里。</span></div>
+    <div v-if="loading" class="records-empty">正在读取实验作答记录…</div>
+    <div v-else-if="!data?.items.length" class="records-empty"><strong>本实验还没有做题记录</strong><span>题目生成并提交后，会自动按实验汇总到这里。</span></div>
     <div v-else-if="!visibleItems.length" class="records-empty">当前筛选条件下没有题目。</div>
     <div v-else class="question-list">
       <article v-for="(item,index) in visibleItems" :key="item.generatedQuestionId" class="question-card" :class="{ open: expandedId === item.generatedQuestionId }">
