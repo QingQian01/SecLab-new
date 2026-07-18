@@ -19,6 +19,22 @@ class TeacherApiErrorTest(unittest.TestCase):
             "/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks/{knowledge_point_id}",
             paths,
         )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-points/{knowledge_point_id}/ai-analysis",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}/review",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}/regenerate",
+            paths,
+        )
 
     def test_teacher_auth_loads_owned_teaching_classes(self):
         connection = _FakeConnection(
