@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   buildKnowledgeRiskPie,
-  buildRiskHeatmap,
   classifyKnowledgeRisk,
   findMatchingRiskItem,
   getRiskPresentation,
@@ -25,6 +25,12 @@ function pieRisk(overrides: Record<string, unknown> = {}) {
 }
 
 describe('teaching analysis presentation', () => {
+  it('uses pie-chart and experiment wording throughout the teacher page', () => {
+    const pageSource = readFileSync(new URL('../index.vue', import.meta.url), 'utf8')
+    expect(pageSource).not.toContain('热力图')
+    expect(pageSource).toContain('饼图')
+    expect(pageSource).toContain('本实验')
+  })
   it('maps risk levels to stable teacher-facing labels', () => {
     expect(getRiskPresentation('high')).toEqual({ label: '高风险', tone: 'danger' })
     expect(getRiskPresentation('medium')).toEqual({ label: '需关注', tone: 'warning' })
@@ -69,32 +75,6 @@ describe('teaching analysis presentation', () => {
 
     expect(matched?.knowledgePointName).toBe('XSS 与 CSRF 攻击')
     expect(matched?.affectedStudents[0].studentName).toBe('陈宇航')
-  })
-
-  it('builds a real knowledge-point by student error heatmap', () => {
-    const model = buildRiskHeatmap([
-      {
-        knowledgePointName: 'XSS 输入输出上下文判断',
-        riskLevel: 'medium',
-        incorrectRate: 0.4,
-        affectedStudents: [
-          { studentId: 261, studentName: '陈宇航' },
-          { studentId: 263, studentName: '王子睿' },
-        ],
-      },
-      {
-        knowledgePointName: 'SQL 联合查询列数判断',
-        riskLevel: 'high',
-        incorrectRate: 0.6,
-        affectedStudents: [{ studentId: 263, studentName: '王子睿' }],
-      },
-    ])
-
-    expect(model.students.map((student) => student.studentName)).toEqual(['陈宇航', '王子睿'])
-    expect(model.rows[0].errorRatePercent).toBe(40)
-    expect(model.rows[0].cells.map((cell) => cell.hasError)).toEqual([true, true])
-    expect(model.rows[1].cells.map((cell) => cell.hasError)).toEqual([false, true])
-    expect(model.rows[1].cells[1].tone).toBe('high')
   })
 
   it('keeps same-colour knowledge points as independent pie slices', () => {

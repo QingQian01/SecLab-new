@@ -95,13 +95,6 @@ export function findMatchingRiskItem<T extends RiskItemLike>(
   return best?.item || null
 }
 
-interface RiskHeatmapItemLike {
-  knowledgePointName: string
-  riskLevel: string
-  incorrectRate: number
-  affectedStudents: Array<{ studentId: number; studentName: string }>
-}
-
 interface RiskPieItemLike {
   courseId?: number | null
   knowledgePointId?: number | null
@@ -162,28 +155,4 @@ export function formatRiskRatePercent(value?: number | null): number {
   const rate = Number(value)
   if (!Number.isFinite(rate)) return 0
   return Math.round(Math.min(1, Math.max(0, rate)) * 100)
-}
-
-export function buildRiskHeatmap<T extends RiskHeatmapItemLike>(items: T[]) {
-  const studentMap = new Map<number, { studentId: number; studentName: string }>()
-  for (const item of items) {
-    for (const student of item.affectedStudents) {
-      if (!studentMap.has(student.studentId)) studentMap.set(student.studentId, student)
-    }
-  }
-  const students = [...studentMap.values()]
-  const rows = items.map((item) => {
-    const affectedIds = new Set(item.affectedStudents.map((student) => student.studentId))
-    return {
-      item,
-      knowledgePointName: item.knowledgePointName,
-      errorRatePercent: formatRiskRatePercent(item.incorrectRate),
-      cells: students.map((student) => ({
-        studentId: student.studentId,
-        hasError: affectedIds.has(student.studentId),
-        tone: String(item.riskLevel || 'unknown').toLowerCase(),
-      })),
-    }
-  })
-  return { students, rows }
 }
