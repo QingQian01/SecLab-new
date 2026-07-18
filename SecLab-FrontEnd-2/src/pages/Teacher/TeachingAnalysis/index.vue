@@ -8,7 +8,7 @@ import {
   getTeachingClassAnalysis,
   getTeachingClassInterventions,
   getTeachingClasses,
-  getTeachingClassRiskMap,
+  getTeachingClassExperimentRiskMap,
   getTeachingClassStudentAnalysis,
   getTeachingClassStudentCapabilityEvidence,
   getTeachingClassStudentLearningReplay,
@@ -38,7 +38,8 @@ import {
   type TeacherCourseAnalysisDto,
 } from '../../../api'
 import CapabilityEvidencePanel from './components/CapabilityEvidencePanel.vue'
-import KnowledgeRiskHeatmap from './components/KnowledgeRiskHeatmap.vue'
+import KnowledgeRiskPieChart from './components/KnowledgeRiskPieChart.vue'
+import KnowledgeRiskDetailDrawer from './components/KnowledgeRiskDetailDrawer.vue'
 import LearningReplayTimeline from './components/LearningReplayTimeline.vue'
 import TeachingActionPanel from './components/TeachingActionPanel.vue'
 import CourseQuestionRecords from './components/CourseQuestionRecords.vue'
@@ -64,6 +65,7 @@ const capabilityEvidence = ref<CapabilityEvidenceResponseDto | null>(null)
 const learningReplay = ref<LearningReplayResponseDto | null>(null)
 const riskItems = ref<KnowledgeRiskItemDto[]>([])
 const selectedRisk = ref<KnowledgeRiskItemDto | null>(null)
+const riskDrawerOpen = ref(false)
 const interventions = ref<TeacherInterventionDto[]>([])
 const aiHealth = ref<AiAnalysisHealthDto | null>(null)
 const classCourseQuestions = ref<TeacherCourseQuestionsDto | null>(null)
@@ -151,12 +153,11 @@ async function loadClassData() {
   studentAnalysis.value = null
   capabilityEvidence.value = null
   learningReplay.value = null
-  const [studentResult, courseResult, summaryResult, analysisResult, riskResult, interventionResult] = await Promise.allSettled([
+  const [studentResult, courseResult, summaryResult, analysisResult, interventionResult] = await Promise.allSettled([
     getTeachingClassStudents(classId),
     getTeachingClassCourses(classId),
     getGeneratedQuestionSummary(classId),
     getTeachingClassAnalysis(classId),
-    getTeachingClassRiskMap(classId),
     getTeachingClassInterventions(classId),
   ])
   if (classId !== selectedClassId.value) return
@@ -164,9 +165,10 @@ async function loadClassData() {
   courses.value = courseResult.status === 'fulfilled' ? courseResult.value : []
   questionSummary.value = summaryResult.status === 'fulfilled' ? summaryResult.value : null
   classAnalysis.value = analysisResult.status === 'fulfilled' ? analysisResult.value : null
-  riskItems.value = riskResult.status === 'fulfilled' ? riskResult.value.items : []
   interventions.value = interventionResult.status === 'fulfilled' ? interventionResult.value.items : []
-  selectedRisk.value = riskItems.value[0] || null
+  riskItems.value = []
+  selectedRisk.value = null
+  riskDrawerOpen.value = false
   if (studentResult.status === 'rejected') classError.value = getApiErrorMessage(studentResult.reason, '学生名单加载失败。')
   selectedStudentId.value = students.value[0]?.studentId || null
   const queryCourseId = Number(route.query.courseId)
@@ -191,14 +193,19 @@ async function loadCourseData() {
   const courseId = selectedCourseId.value
   courseDataLoading.value = true
   courseError.value = ''
-  const [questionsResult, analysisResult] = await Promise.allSettled([
+  const [questionsResult, analysisResult, riskResult] = await Promise.allSettled([
     getTeacherClassCourseQuestions(classId, courseId),
     getTeacherCourseAnalysis(classId, courseId),
+    getTeachingClassExperimentRiskMap(classId, courseId),
   ])
   if (classId !== selectedClassId.value || courseId !== selectedCourseId.value) return
   classCourseQuestions.value = questionsResult.status === 'fulfilled' ? questionsResult.value : null
   classCourseAnalysis.value = analysisResult.status === 'fulfilled' ? analysisResult.value : null
-    if (questionsResult.status === 'rejected') courseError.value = getApiErrorMessage(questionsResult.reason, '实验做题记录加载失败。')
+  riskItems.value = riskResult.status === 'fulfilled' ? riskResult.value.items : []
+  selectedRisk.value = riskItems.value[0] || null
+  riskDrawerOpen.value = false
+  if (questionsResult.status === 'rejected') courseError.value = getApiErrorMessage(questionsResult.reason, '实验做题记录加载失败。')
+  else if (riskResult.status === 'rejected') courseError.value = getApiErrorMessage(riskResult.reason, '本实验知识点错误分布加载失败。')
   courseDataLoading.value = false
   await loadStudentCourseData()
 }
@@ -290,10 +297,12 @@ async function rebuildProfiles() {
 
 function selectRisk(item: KnowledgeRiskItemDto) {
   selectedRisk.value = item
+  riskDrawerOpen.value = true
 }
 
 function selectRiskAndScroll(item: KnowledgeRiskItemDto) {
-  selectRisk(item)
+  selectedRisk.value = item
+  riskDrawerOpen.value = false
   requestAnimationFrame(() => document.querySelector('.action-block')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
 
@@ -361,7 +370,15 @@ onMounted(() => void loadClasses())
           <div v-if="classAnalysis?.analysis" class="result-body"><p class="overall-comment">{{ classAnalysis.analysis.overallComment }}</p><div v-if="classProblems.length" class="problem-list"><article v-for="(item,index) in classProblems" :key="`${item.title}-${index}`" class="problem-card" :class="{ expanded: expandedProblemIndex === index }" role="button" :tabindex="0" :aria-expanded="expandedProblemIndex === index" @click="toggleProblem(index)" @keydown.enter.prevent="toggleProblem(index)"><div class="problem-index">{{ index+1 }}</div><div class="problem-main"><div class="problem-title"><strong>{{ item.title }}</strong><div class="problem-title-actions"><span>涉及 {{ item.studentCount }} 人</span><button type="button" class="problem-detail-button" @click.stop="toggleProblem(index)">{{ expandedProblemIndex === index ? '收起详情' : '查看详情' }}</button></div></div><p>{{ item.evidence }}</p><div class="teacher-action"><span>教学建议</span>{{ item.teacherAction }}</div><div v-if="expandedProblemIndex === index" class="problem-detail" @click.stop><template v-if="problemRisk(item)"><div class="problem-detail-summary"><div><span>对应知识点</span><strong>{{ problemRisk(item)?.knowledgePointName }}</strong></div><div><span>风险等级</span><strong :class="`risk-${getRiskPresentation(problemRisk(item)?.riskLevel).tone}`">{{ getRiskPresentation(problemRisk(item)?.riskLevel).label }}</strong></div><div><span>错题率</span><strong>{{ Math.round(Number(problemRisk(item)?.incorrectRate || 0) * 100) }}%</strong></div><div><span>错误记录</span><strong>{{ problemRisk(item)?.incorrectCount || 0 }} 条</strong></div></div><div class="problem-detail-section"><h4>涉及学生</h4><div class="student-chips"><span v-for="student in problemRisk(item)?.affectedStudents || []" :key="student.studentId">{{ student.studentName || `学生 ${student.studentId}` }}</span></div></div><div class="problem-detail-section"><h4>代表性错题</h4><div v-for="question in problemRisk(item)?.representativeQuestions || []" :key="question.generatedQuestionId" class="question-row">{{ question.title }}<small>{{ question.generatedQuestionId }}</small></div></div><button type="button" class="problem-action-link" @click="selectRiskAndScroll(problemRisk(item)!)">定位热力图并创建教学干预</button></template><template v-else><div class="problem-detail-section"><h4>证据题目</h4><div class="student-chips"><span v-for="questionId in item.questionIds" :key="questionId">{{ questionId }}</span></div><p>当前问题已有班级分析证据，但还没有匹配到知识点热力图记录。</p></div></template></div></div></article></div></div>
           <div v-else class="empty-state compact-empty"><strong>尚未进行班级 AI 分析</strong>风险热力图和证据数据已经可用；点击“开始分析”生成班级总结。</div>
         </section>
-        <section class="panel feature-panel"><KnowledgeRiskHeatmap :items="riskItems" @select="selectRisk" @action="selectRiskAndScroll" /></section>
+        <section class="panel feature-panel"><KnowledgeRiskPieChart :items="riskItems" :selected-course-id="selectedCourseId!" @select="selectRisk" /></section>
+        <KnowledgeRiskDetailDrawer
+          :open="riskDrawerOpen"
+          :class-id="selectedClassId!"
+          :course-id="selectedCourseId!"
+          :item="selectedRisk"
+          @close="riskDrawerOpen = false"
+          @action="selectRiskAndScroll"
+        />
         <section class="panel feature-panel"><TeachingActionPanel :class-id="selectedClassId!" :students="students" :selected-risk="selectedRisk" :interventions="interventions" @changed="loadInterventions" /></section>
       </template>
 
