@@ -177,6 +177,45 @@ def _iso(value: Any) -> Optional[str]:
     return str(value)
 
 
+def build_assignment_learning_summary(row: dict[str, Any]) -> dict[str, Any]:
+    question_count = max(
+        int(row.get("snapshot_question_count") or 0),
+        int(row.get("session_question_count") or 0),
+    )
+    attempt_count = int(row.get("attempt_count") or 0)
+    due_at = row.get("due_at")
+    is_overdue = bool(
+        due_at
+        and row.get("assignment_status") != "COMPLETED"
+        and due_at < datetime.utcnow()
+    )
+    result_summary = None
+    if attempt_count:
+        result_summary = {
+            "attemptCount": attempt_count,
+            "correctCount": int(row.get("correct_count") or 0),
+            "averageScore": _number(row.get("average_score")) or 0.0,
+        }
+    return {
+        "questionCount": question_count,
+        "estimatedMinutes": question_count * 5,
+        "isOverdue": is_overdue,
+        "resultSummary": result_summary,
+    }
+
+
+def has_completed_assignment(question_count: int, attempted_question_count: int) -> bool:
+    return int(question_count or 0) > 0 and int(attempted_question_count or 0) >= int(question_count or 0)
+
+
+def resolve_assignment_status(current_status: str, question_count: int, attempted_question_count: int) -> str:
+    if str(current_status or "").upper() == "COMPLETED":
+        return "COMPLETED"
+    if has_completed_assignment(question_count, attempted_question_count):
+        return "COMPLETED"
+    return str(current_status or "PENDING").upper()
+
+
 def build_metric_snapshot(profile: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     if not profile:
         return None
@@ -427,7 +466,19 @@ def get_intervention(teacher_id: int, class_id: int, intervention_id: int) -> di
                 raise KeyError("intervention does not exist")
             cursor.execute(
                 f"""
-                SELECT tis.*, u.user_student_number, u.user_name
+                SELECT tis.*, u.user_student_number, u.user_name,
+                       (SELECT COUNT(*) FROM teacher_intervention_exercise_snapshot ties
+                         WHERE ties.intervention_id=tis.intervention_id) AS snapshot_question_count,
+                       (SELECT COUNT(*) FROM generated_question gq
+                         WHERE gq.training_session_id=tis.training_session_id) AS session_question_count,
+                       (SELECT COUNT(*) FROM generated_question_attempt gqa
+                         WHERE gqa.training_session_id=tis.training_session_id) AS attempt_count,
+                       (SELECT COUNT(DISTINCT gqa.generated_question_id) FROM generated_question_attempt gqa
+                         WHERE gqa.training_session_id=tis.training_session_id) AS attempted_question_count,
+                       (SELECT COUNT(*) FROM generated_question_attempt gqa
+                         WHERE gqa.training_session_id=tis.training_session_id AND gqa.is_correct=1) AS correct_count,
+                       (SELECT AVG(gqa.score) FROM generated_question_attempt gqa
+                         WHERE gqa.training_session_id=tis.training_session_id) AS average_score
                 FROM teacher_intervention_student tis
                 LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u ON u.user_id = tis.student_id
                 WHERE tis.intervention_id = %s
@@ -455,20 +506,26 @@ def get_intervention(teacher_id: int, class_id: int, intervention_id: int) -> di
     for item in student_rows:
         baseline = _json_loads(item.get("baseline_snapshot_json"), None)
         latest = _json_loads(item.get("latest_snapshot_json"), None)
-        if item.get("assignment_status") == "COMPLETED":
+        effective_status = resolve_assignment_status(
+            item.get("assignment_status"),
+            item.get("session_question_count"),
+            item.get("attempted_question_count"),
+        )
+        if effective_status == "COMPLETED":
             completed_count += 1
         students.append(
             {
                 "studentId": int(item["student_id"]),
                 "studentNumber": item.get("user_student_number"),
                 "studentName": item.get("user_name"),
-                "assignmentStatus": item.get("assignment_status"),
+                "assignmentStatus": effective_status,
                 "trainingSessionId": item.get("training_session_id"),
                 "startedAt": _iso(item.get("started_at")),
                 "completedAt": _iso(item.get("completed_at")),
                 "baseline": baseline,
                 "latest": latest,
                 "comparison": compare_metric_snapshots(baseline, latest),
+                "resultSummary": build_assignment_learning_summary(item)["resultSummary"],
             }
         )
     result["students"] = students
@@ -542,10 +599,22 @@ def refresh_intervention_metrics(
                 completed_at = None
                 if student.get("trainingSessionId"):
                     cursor.execute(
-                        "SELECT COUNT(*) AS count FROM generated_question_attempt WHERE training_session_id = %s",
+                        """
+                        SELECT COUNT(DISTINCT gq.generated_question_id) AS question_count,
+                               COUNT(DISTINCT gqa.generated_question_id) AS attempted_question_count
+                        FROM generated_question gq
+                        LEFT JOIN generated_question_attempt gqa
+                          ON gqa.generated_question_id=gq.generated_question_id
+                         AND gqa.training_session_id=gq.training_session_id
+                        WHERE gq.training_session_id = %s
+                        """,
                         (student["trainingSessionId"],),
                     )
-                    if int((cursor.fetchone() or {}).get("count") or 0) > 0:
+                    completion = cursor.fetchone() or {}
+                    if has_completed_assignment(
+                        completion.get("question_count"),
+                        completion.get("attempted_question_count"),
+                    ):
                         status = "COMPLETED"
                         completed_at = datetime.utcnow()
                 cursor.execute(
@@ -577,7 +646,19 @@ def list_student_assignments(student_id: int) -> dict[str, Any]:
                 SELECT ti.*, tis.assignment_status, tis.training_session_id,
                        tis.started_at, tis.completed_at,
                        tc.class_name, u.user_name AS teacher_name,
-                       kp.name AS knowledge_point_name
+                       c.course_name, kp.name AS knowledge_point_name,
+                       (SELECT COUNT(*) FROM teacher_intervention_exercise_snapshot ties
+                         WHERE ties.intervention_id=ti.intervention_id) AS snapshot_question_count,
+                       (SELECT COUNT(*) FROM generated_question gq
+                         WHERE gq.training_session_id=tis.training_session_id) AS session_question_count,
+                       (SELECT COUNT(*) FROM generated_question_attempt gqa
+                         WHERE gqa.training_session_id=tis.training_session_id) AS attempt_count,
+                       (SELECT COUNT(DISTINCT gqa.generated_question_id) FROM generated_question_attempt gqa
+                         WHERE gqa.training_session_id=tis.training_session_id) AS attempted_question_count,
+                       (SELECT COUNT(*) FROM generated_question_attempt gqa
+                         WHERE gqa.training_session_id=tis.training_session_id AND gqa.is_correct=1) AS correct_count,
+                       (SELECT AVG(gqa.score) FROM generated_question_attempt gqa
+                         WHERE gqa.training_session_id=tis.training_session_id) AS average_score
                 FROM teacher_intervention_student tis
                 INNER JOIN teacher_intervention ti
                   ON ti.intervention_id = tis.intervention_id
@@ -585,6 +666,8 @@ def list_student_assignments(student_id: int) -> dict[str, Any]:
                   ON tc.teaching_class_id = ti.teaching_class_id
                 LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u
                   ON u.user_id = ti.teacher_id
+                LEFT JOIN `{USER_SERVICE_SCHEMA}`.`course` c
+                  ON c.id = ti.course_id
                 LEFT JOIN knowledge_point kp
                   ON kp.knowledge_point_id = ti.knowledge_point_id
                 WHERE tis.student_id = %s
@@ -598,16 +681,24 @@ def list_student_assignments(student_id: int) -> dict[str, Any]:
             rows = list(cursor.fetchall() or [])
     items = []
     for row in rows:
+        effective_status = resolve_assignment_status(
+            row.get("assignment_status"),
+            row.get("session_question_count"),
+            row.get("attempted_question_count"),
+        )
+        summary_row = {**row, "assignment_status": effective_status}
         item = _serialize_intervention(row)
         item.update(
             {
                 "className": row.get("class_name"),
                 "teacherName": row.get("teacher_name"),
+                "courseName": row.get("course_name"),
                 "knowledgePointName": row.get("knowledge_point_name"),
-                "assignmentStatus": row.get("assignment_status"),
+                "assignmentStatus": effective_status,
                 "trainingSessionId": row.get("training_session_id"),
                 "startedAt": _iso(row.get("started_at")),
                 "completedAt": _iso(row.get("completed_at")),
+                **build_assignment_learning_summary(summary_row),
             }
         )
         items.append(item)

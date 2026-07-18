@@ -1,10 +1,37 @@
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import teacher_intervention_repository as interventions
 
 
 class TeacherInterventionHelpersTest(unittest.TestCase):
+    def test_student_assignment_summary_exposes_experiment_questions_deadline_and_result(self):
+        row = {
+            "assignment_status": "COMPLETED",
+            "due_at": datetime.now() - timedelta(days=1),
+            "snapshot_question_count": 3,
+            "session_question_count": 3,
+            "attempt_count": 3,
+            "correct_count": 2,
+            "average_score": 78.5,
+        }
+
+        summary = interventions.build_assignment_learning_summary(row)
+
+        self.assertEqual(summary["questionCount"], 3)
+        self.assertEqual(summary["estimatedMinutes"], 15)
+        self.assertFalse(summary["isOverdue"])
+        self.assertEqual(summary["resultSummary"], {
+            "attemptCount": 3, "correctCount": 2, "averageScore": 78.5,
+        })
+
+    def test_assignment_is_complete_only_after_every_snapshot_question_was_answered(self):
+        self.assertFalse(interventions.has_completed_assignment(3, 1))
+        self.assertTrue(interventions.has_completed_assignment(3, 3))
+        self.assertFalse(interventions.has_completed_assignment(0, 0))
+        self.assertEqual(interventions.resolve_assignment_status("STARTED", 3, 3), "COMPLETED")
+
     def test_only_approved_exercises_can_be_snapshotted(self):
         approved = {
             "exercise_id": 31,

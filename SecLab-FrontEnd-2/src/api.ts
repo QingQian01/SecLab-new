@@ -1087,6 +1087,7 @@ export interface TeacherInterventionStudentDto {
         improvedDimensions: string[];
         status: string;
     };
+    resultSummary?: { attemptCount: number; correctCount: number; averageScore: number } | null;
 }
 
 export interface TeacherInterventionDto {
@@ -1116,11 +1117,16 @@ export interface TeacherInterventionDto {
 export interface StudentTeacherAssignmentDto extends TeacherInterventionDto {
     className?: string | null;
     teacherName?: string | null;
+    courseName?: string | null;
     knowledgePointName?: string | null;
     assignmentStatus: "PENDING" | "STARTED" | "COMPLETED" | string;
     trainingSessionId?: string | null;
     startedAt?: string | null;
     completedAt?: string | null;
+    questionCount: number;
+    estimatedMinutes: number;
+    isOverdue: boolean;
+    resultSummary?: { attemptCount: number; correctCount: number; averageScore: number } | null;
 }
 
 export interface TeacherUserListItemDto {

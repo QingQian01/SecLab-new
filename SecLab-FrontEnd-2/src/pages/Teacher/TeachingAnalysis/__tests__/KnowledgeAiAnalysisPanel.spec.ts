@@ -78,4 +78,24 @@ describe('KnowledgeAiAnalysisPanel', () => {
     expect(html).not.toContain('<option value="TARGETED_PRACTICE"')
     expect(html).toContain('专项练习请在知识点详情中审核例题后下发')
   })
+
+  it('shows student completion and answer results in the teacher feedback loop', async () => {
+    const html = await renderToString(createSSRApp(TeachingActionPanel, {
+      classId: 101,
+      students: [],
+      selectedRisk: null,
+      interventions: [{
+        interventionId: 17, teacherId: 7, teachingClassId: 101, courseId: 7,
+        title: '列数判断个性化练习', actionType: 'TARGETED_PRACTICE', knowledgePointId: 71,
+        description: '专项练习', status: 'ACTIVE', baselineAt: '2026-07-18T10:00:00',
+        dueAt: '2026-07-20T10:00:00', createdAt: '2026-07-18T10:00:00', updatedAt: '2026-07-18T10:00:00',
+        students: [{ studentId: 261, studentName: '陈宇航', assignmentStatus: 'COMPLETED', resultSummary: { attemptCount: 3, correctCount: 2, averageScore: 82 } }],
+        questions: [], progress: { studentCount: 1, completedCount: 1, completionRate: 1, evaluationDue: false },
+      }],
+    }))
+
+    expect(html).toContain('陈宇航')
+    expect(html).toContain('平均 82 分')
+    expect(html).toContain('已完成')
+  })
 })
