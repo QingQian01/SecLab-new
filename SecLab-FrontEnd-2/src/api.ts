@@ -1031,6 +1031,45 @@ export interface KnowledgeRiskDetailDto extends KnowledgeRiskItemDto {
     pagination: { page: number; size: number; total: number };
 }
 
+export type KnowledgeExerciseRole = "FOUNDATION" | "CONSOLIDATION" | "TRANSFER";
+export type KnowledgeExerciseReviewStatus = "PENDING_REVIEW" | "APPROVED" | "NEEDS_REVISION" | "REJECTED";
+
+export interface KnowledgeExerciseDto {
+    exerciseId: number;
+    analysisId: number;
+    role: KnowledgeExerciseRole;
+    questionType: string;
+    stem: string;
+    options: string[];
+    standardAnswer: string;
+    explanation: string;
+    difficulty: number;
+    generationRationale: string;
+    reviewStatus: KnowledgeExerciseReviewStatus | string;
+    reviewComment: string;
+    sourceVersion: number;
+    reviewedBy?: number | null;
+    reviewedAt?: string | null;
+    updatedAt?: string | null;
+}
+
+export interface KnowledgeAiAnalysisDto {
+    teacherId: number;
+    teachingClassId: number;
+    courseId: number;
+    knowledgePointId: number;
+    analysisStatus: "IDLE" | "RUNNING" | "READY" | "FAILED" | string;
+    analysis?: {
+        overallConclusion: string;
+        commonMistakes: Array<{ title: string; reason: string }>;
+        teachingAdvice: Array<{ title: string; action: string }>;
+    } | null;
+    evidence?: Record<string, unknown> | null;
+    lastErrorMessage?: string | null;
+    generatedAt?: string | null;
+    exercises: KnowledgeExerciseDto[];
+}
+
 export type TeacherInterventionActionType = "FOCUS_GROUP" | "TARGETED_PRACTICE" | "LESSON_EXAMPLE";
 
 export interface TeacherInterventionStudentDto {
@@ -1054,6 +1093,7 @@ export interface TeacherInterventionDto {
     interventionId: number;
     teacherId: number;
     teachingClassId: number;
+    courseId?: number | null;
     title: string;
     actionType: TeacherInterventionActionType;
     knowledgePointId?: number | null;
@@ -2546,6 +2586,70 @@ export async function getTeachingClassKnowledgeRiskDetail(
     return response.data;
 }
 
+export async function getKnowledgePointAiAnalysis(
+    teachingClassId: number,
+    courseId: number,
+    knowledgePointId: number,
+): Promise<KnowledgeAiAnalysisDto> {
+    const response = await axios.get<KnowledgeAiAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/experiments/${courseId}/knowledge-points/${knowledgePointId}/ai-analysis`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function startKnowledgePointAiAnalysis(
+    teachingClassId: number,
+    courseId: number,
+    knowledgePointId: number,
+): Promise<KnowledgeAiAnalysisDto> {
+    const response = await axios.post<KnowledgeAiAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/experiments/${courseId}/knowledge-points/${knowledgePointId}/ai-analysis`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function updateKnowledgeExercise(
+    teachingClassId: number,
+    exerciseId: number,
+    payload: Partial<Pick<KnowledgeExerciseDto, "questionType" | "stem" | "options" | "standardAnswer" | "explanation" | "difficulty" | "generationRationale">>,
+): Promise<KnowledgeExerciseDto> {
+    const response = await axios.patch<KnowledgeExerciseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/knowledge-exercises/${exerciseId}`,
+        payload,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function reviewKnowledgeExercise(
+    teachingClassId: number,
+    exerciseId: number,
+    status: Exclude<KnowledgeExerciseReviewStatus, "PENDING_REVIEW">,
+    comment = "",
+): Promise<KnowledgeExerciseDto> {
+    const response = await axios.post<KnowledgeExerciseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/knowledge-exercises/${exerciseId}/review`,
+        { status, comment },
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function regenerateKnowledgeExercise(
+    teachingClassId: number,
+    exerciseId: number,
+): Promise<KnowledgeExerciseDto> {
+    const response = await axios.post<KnowledgeExerciseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/knowledge-exercises/${exerciseId}/regenerate`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
 export async function getTeachingClassInterventions(
     teachingClassId: number,
 ): Promise<{ teachingClassId: number; items: TeacherInterventionDto[] }> {
@@ -2562,9 +2666,11 @@ export async function createTeachingClassIntervention(
         title: string;
         actionType: TeacherInterventionActionType;
         studentIds: number[];
+        courseId?: number | null;
         knowledgePointId?: number | null;
         description?: string;
         questionIds?: string[];
+        approvedExerciseIds?: number[];
         dueAt?: string | null;
     },
 ): Promise<TeacherInterventionDto> {

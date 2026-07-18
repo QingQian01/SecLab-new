@@ -18,7 +18,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ changed: [] }>()
 
-const actionType = ref<TeacherInterventionActionType>('TARGETED_PRACTICE')
+const actionType = ref<TeacherInterventionActionType>('FOCUS_GROUP')
 const title = ref('')
 const description = ref('')
 const selectedStudentIds = ref<number[]>([])
@@ -79,15 +79,15 @@ async function refreshAction(item: TeacherInterventionDto) {
 
 <template>
   <section class="action-block">
-    <div class="section-heading"><div><h2>从分析进入教学行动</h2><p>将风险学生直接加入辅导、下发专项题或沉淀为下节课案例，并保留一周后的效果对照。</p></div></div>
+    <div class="section-heading"><div><h2>从分析进入教学行动</h2><p>创建重点辅导小组或沉淀为下节课案例，并保留后续效果对照。专项练习请在知识点详情中审核例题后下发。</p></div></div>
     <div class="action-layout">
       <form class="action-form" @submit.prevent="createAction">
-        <label>行动类型<select v-model="actionType"><option value="TARGETED_PRACTICE">下发专项题</option><option value="FOCUS_GROUP">创建重点辅导小组</option><option value="LESSON_EXAMPLE">加入下节课典型案例</option></select></label>
+        <label>行动类型<select v-model="actionType"><option value="FOCUS_GROUP">创建重点辅导小组</option><option value="LESSON_EXAMPLE">加入下节课典型案例</option></select></label>
         <label>行动名称<input v-model="title" placeholder="例如：SQL盲注专项辅导" /></label>
         <label>教学说明<textarea v-model="description" rows="3" placeholder="说明需要关注的问题和预期结果"></textarea></label>
         <fieldset><legend>参与学生（已选 {{ selectedCount }} 人）</legend><div class="student-checks"><label v-for="student in students" :key="student.studentId"><input v-model="selectedStudentIds" type="checkbox" :value="student.studentId" /><span>{{ student.studentName || student.studentNumber }}</span></label></div></fieldset>
         <div v-if="error" class="form-message error">{{ error }}</div><div v-if="message" class="form-message success">{{ message }}</div>
-        <button class="primary-button" type="submit" :disabled="creating">{{ creating ? '正在创建…' : '创建并下发' }}</button>
+        <button class="primary-button" type="submit" :disabled="creating">{{ creating ? '正在创建…' : '创建教学行动' }}</button>
       </form>
       <div class="action-history">
         <h3>行动追踪</h3>
@@ -97,7 +97,7 @@ async function refreshAction(item: TeacherInterventionDto) {
           <div class="progress-row"><span>{{ item.progress.completedCount }}/{{ item.progress.studentCount }} 人完成</span><progress :value="item.progress.completionRate" max="1"></progress><button type="button" :disabled="refreshingId === item.interventionId" @click="refreshAction(item)">{{ refreshingId === item.interventionId ? '更新中…' : '更新对照' }}</button></div>
           <small>对照时间：{{ new Date(item.dueAt).toLocaleDateString('zh-CN') }}；届时自动比较能力分数和错题表现。</small>
         </article>
-        <div v-if="!interventions.length" class="empty-inline">还没有教学行动。点击上方热力图中的知识点，可快速带入风险学生。</div>
+        <div v-if="!interventions.length" class="empty-inline">还没有教学行动。点击上方饼图中的知识点，可查看证据并带入相关学生。</div>
       </div>
     </div>
   </section>

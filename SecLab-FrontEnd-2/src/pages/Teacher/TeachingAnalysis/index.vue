@@ -376,8 +376,9 @@ onMounted(() => void loadClasses())
           :class-id="selectedClassId!"
           :course-id="selectedCourseId!"
           :item="selectedRisk"
+          :all-students="students"
           @close="riskDrawerOpen = false"
-          @action="selectRiskAndScroll"
+          @issued="loadInterventions"
         />
         <section class="panel feature-panel"><TeachingActionPanel :class-id="selectedClassId!" :students="students" :selected-risk="selectedRisk" :interventions="interventions" @changed="loadInterventions" /></section>
       </template>

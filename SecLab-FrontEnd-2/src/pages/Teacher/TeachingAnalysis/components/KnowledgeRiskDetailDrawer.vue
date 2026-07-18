@@ -5,8 +5,10 @@ import {
   getTeachingClassKnowledgeRiskDetail,
   type KnowledgeRiskDetailDto,
   type KnowledgeRiskItemDto,
+  type TeachingClassStudentDto,
 } from '../../../../api'
 import { classifyKnowledgeRisk, formatRiskRatePercent } from '../analysisPresentation'
+import KnowledgeAiAnalysisPanel from './KnowledgeAiAnalysisPanel.vue'
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -14,11 +16,12 @@ const props = withDefaults(defineProps<{
   courseId: number
   item: KnowledgeRiskItemDto | null
   initialDetail?: KnowledgeRiskDetailDto | null
-}>(), { initialDetail: null })
+  allStudents?: TeachingClassStudentDto[]
+}>(), { initialDetail: null, allStudents: () => [] })
 
 const emit = defineEmits<{
   close: []
-  action: [item: KnowledgeRiskItemDto]
+  issued: []
 }>()
 
 const detail = ref<KnowledgeRiskDetailDto | null>(props.initialDetail)
@@ -146,7 +149,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             </div>
           </section>
 
-          <button type="button" class="primary-action" @click="emit('action', item)">基于此知识点生成 AI 分析与教学建议</button>
+          <KnowledgeAiAnalysisPanel
+            :class-id="classId"
+            :course-id="courseId"
+            :knowledge-point-id="item.knowledgePointId"
+            :knowledge-point-name="item.knowledgePointName"
+            :affected-students="item.affectedStudents"
+            :all-students="allStudents"
+            @issued="emit('issued')"
+          />
         </div>
       </aside>
     </div>
