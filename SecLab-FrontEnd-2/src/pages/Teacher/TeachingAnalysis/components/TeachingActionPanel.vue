@@ -53,7 +53,7 @@ async function createAction() {
       description: description.value.trim(),
       questionIds: props.selectedRisk?.representativeQuestions.map((item) => item.generatedQuestionId) || [],
     })
-    message.value = '教学行动已创建，并已同步到相关学生的画像页。'
+    message.value = '教学行动已创建。'
     emit('changed')
   } catch (cause) {
     error.value = getApiErrorMessage(cause, '教学行动创建失败，请稍后重试。')
@@ -79,7 +79,7 @@ async function refreshAction(item: TeacherInterventionDto) {
 
 <template>
   <section class="action-block">
-    <div class="section-heading"><div><h2>从分析进入教学行动</h2><p>创建重点辅导小组或沉淀为下节课案例，并保留后续效果对照。专项练习请在知识点详情中审核例题后下发。</p></div></div>
+    <div class="section-heading"><h2>教学行动</h2></div>
     <div class="action-layout">
       <form class="action-form" @submit.prevent="createAction">
         <label>行动类型<select v-model="actionType"><option value="FOCUS_GROUP">创建重点辅导小组</option><option value="LESSON_EXAMPLE">加入下节课典型案例</option></select></label>
@@ -98,9 +98,9 @@ async function refreshAction(item: TeacherInterventionDto) {
           <div v-if="item.students.length" class="student-results">
             <div v-for="student in item.students" :key="student.studentId"><span>{{ student.studentName || student.studentNumber || `学生 ${student.studentId}` }}</span><strong>{{ student.assignmentStatus === 'COMPLETED' ? '已完成' : student.assignmentStatus === 'STARTED' ? '进行中' : '待开始' }}</strong><small v-if="student.resultSummary">答对 {{ student.resultSummary.correctCount }}/{{ student.resultSummary.attemptCount }} · 平均 {{ student.resultSummary.averageScore }} 分</small></div>
           </div>
-          <small>对照时间：{{ new Date(item.dueAt).toLocaleDateString('zh-CN') }}；届时自动比较能力分数和错题表现。</small>
+          <small>对照时间：{{ new Date(item.dueAt).toLocaleDateString('zh-CN') }}</small>
         </article>
-        <div v-if="!interventions.length" class="empty-inline">还没有教学行动。点击上方饼图中的知识点，可查看证据并带入相关学生。</div>
+        <div v-if="!interventions.length" class="empty-inline">暂无教学行动</div>
       </div>
     </div>
   </section>

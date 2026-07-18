@@ -61,7 +61,6 @@ onMounted(() => { if (!props.initialAssignments) void loadAssignments() })
     <div class="card-body gap-4">
       <div>
         <h2 class="card-title text-lg">老师布置的个性化练习</h2>
-        <p class="mt-1 text-sm text-base-content/60">题目均由老师针对你的知识点情况审核后下发；完成后，作答结果会回流给老师用于后续教学。</p>
       </div>
       <div v-if="error" class="alert alert-error py-3 text-sm">{{ error }}</div>
       <div v-if="loading" class="text-sm text-base-content/50">正在读取教师布置任务…</div>
@@ -75,9 +74,9 @@ onMounted(() => { if (!props.initialAssignments) void loadAssignments() })
           <div class="mt-3 flex flex-wrap gap-2 text-xs text-base-content/50"><span v-if="item.courseName" class="badge badge-ghost badge-sm">实验：{{ item.courseName }}</span><span v-if="item.knowledgePointName" class="badge badge-outline badge-sm">知识点：{{ item.knowledgePointName }}</span></div>
           <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-base-content/55"><span>{{ item.questionCount }} 题</span><span>预计 {{ item.estimatedMinutes }} 分钟</span><span :class="{ 'text-error font-medium': item.isOverdue }">截止 {{ new Date(item.dueAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</span></div>
           <div v-if="item.resultSummary" class="mt-3 rounded-lg bg-success/10 px-3 py-2 text-xs text-success"><strong>作答结果</strong><span class="ml-3">完成 {{ item.resultSummary.attemptCount }} 次 · 答对 {{ item.resultSummary.correctCount }} 次 · 平均 {{ item.resultSummary.averageScore }} 分</span></div>
-          <button class="btn btn-primary btn-sm mt-4" :disabled="startingId === item.interventionId" @click="startAssignment(item)">{{ startingId === item.interventionId ? '正在准备老师审核题目…' : item.assignmentStatus === 'COMPLETED' ? '查看作答结果' : item.trainingSessionId ? '继续练习' : '开始练习' }}</button>
+          <button class="btn btn-primary btn-sm mt-4" :disabled="startingId === item.interventionId" @click="startAssignment(item)">{{ startingId === item.interventionId ? '正在准备…' : item.assignmentStatus === 'COMPLETED' ? '查看作答结果' : item.trainingSessionId ? '继续练习' : '开始练习' }}</button>
         </article>
-        <div v-if="!assignments.length" class="rounded-box border border-dashed border-base-300 p-6 text-center text-sm text-base-content/50">老师暂未下达个性化练习。收到任务后会在这里显示。</div>
+        <div v-if="!assignments.length" class="rounded-box border border-dashed border-base-300 p-6 text-center text-sm text-base-content/50">暂无个性化练习</div>
       </div>
     </div>
   </section>

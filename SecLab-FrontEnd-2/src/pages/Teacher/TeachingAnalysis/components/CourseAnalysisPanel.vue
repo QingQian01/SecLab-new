@@ -11,14 +11,13 @@ defineEmits<{ analyse: [] }>()
 
 <template>
   <section class="course-analysis">
-    <div class="analysis-head"><div><h2>{{ subjectLabel }}实验分析</h2><p>结论按当前实验的真实作答生成，五维画像不作为题目分组。</p></div><button class="analyse-button" :disabled="analysing" @click="$emit('analyse')">{{ analysing ? '正在分析…' : data?.analysis ? '重新分析本实验' : 'AI 分析本实验' }}</button></div>
+    <div class="analysis-head"><h2>{{ subjectLabel }}实验分析</h2><button class="analyse-button" :disabled="analysing" @click="$emit('analyse')">{{ analysing ? '正在分析…' : data?.analysis ? '重新分析本实验' : 'AI 分析本实验' }}</button></div>
     <div v-if="data?.analysis" class="analysis-body">
-      <div v-if="data.analysis.fallbackUsed" class="provider-note"><strong>证据分析结果</strong>{{ data.analysis.providerMessage || '本次由实验作答证据引擎生成；Dify 恢复后可重新分析。' }}</div>
       <p class="overall">{{ data.analysis.overallComment }}</p>
       <div v-if="data.analysis.knowledgeFindings?.length" class="finding-grid"><article v-for="item in data.analysis.knowledgeFindings" :key="item.knowledgePointName"><div><strong>{{ item.knowledgePointName }}</strong><span>{{ Math.round(Number(item.accuracyRate || 0) * 100) }}% 正确率</span></div><p>{{ item.evidence }}</p><small><b>教学动作</b>{{ item.teacherAction }}</small></article></div>
       <div v-if="data.analysis.teachingSuggestions?.length" class="suggestions"><h3>建议下一步</h3><ol><li v-for="item in data.analysis.teachingSuggestions" :key="item">{{ item }}</li></ol></div>
     </div>
-    <div v-else class="analysis-empty"><strong>还没有本实验的分析</strong><span>先查看下方全部题目，也可以点击按钮按当前实验立即分析。</span></div>
+    <div v-else class="analysis-empty"><strong>暂无本实验分析</strong></div>
   </section>
 </template>
 

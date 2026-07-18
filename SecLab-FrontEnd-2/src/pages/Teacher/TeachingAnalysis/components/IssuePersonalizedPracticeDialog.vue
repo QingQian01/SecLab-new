@@ -82,14 +82,14 @@ async function issue() {
     <div v-if="open" class="issue-layer">
       <button type="button" class="issue-backdrop" aria-label="关闭下发练习窗口" @click="emit('close')"></button>
       <section class="issue-dialog" role="dialog" aria-modal="true" aria-labelledby="issue-title">
-        <header><div><span>教师审核后下发</span><h3 id="issue-title">下发个性化练习</h3></div><button type="button" aria-label="关闭" @click="emit('close')">×</button></header>
+        <header><h3 id="issue-title">下发个性化练习</h3><button type="button" aria-label="关闭" @click="emit('close')">×</button></header>
         <form @submit.prevent="issue">
           <label>任务名称<input v-model="title" required /></label>
           <label>学生说明<textarea v-model="description" rows="2"></textarea></label>
           <fieldset><legend>下发范围</legend><div class="scope-options"><label><input v-model="scope" type="radio" value="affected" />本知识点出错学生（{{ affectedIds.length }} 人）</label><label><input v-model="scope" type="radio" value="all" />全班学生（{{ allStudents.length }} 人）</label><label><input v-model="scope" type="radio" value="custom" />自定义学生</label></div></fieldset>
           <fieldset v-if="scope === 'custom'"><legend>选择学生（{{ customStudentIds.length }} 人）</legend><div class="student-options"><label v-for="student in allStudents" :key="student.studentId"><input v-model="customStudentIds" type="checkbox" :value="student.studentId" />{{ student.studentName || student.studentNumber }}</label></div></fieldset>
           <label>截止时间<input v-model="dueAt" type="datetime-local" /></label>
-          <section class="snapshot-box"><div><strong>将下发的题目</strong><span>{{ approvedExercises.length }} 题</span></div><ul><li v-for="exercise in approvedExercises" :key="exercise.exerciseId">{{ exercise.stem }}</li></ul><p>审核通过的题目将按当前版本生成不可变快照；学生开始作答时不会再次调用 AI 改题。</p></section>
+          <section class="snapshot-box"><div><strong>将下发的题目</strong><span>{{ approvedExercises.length }} 题</span></div><ul><li v-for="exercise in approvedExercises" :key="exercise.exerciseId">{{ exercise.stem }}</li></ul></section>
           <div v-if="error" class="issue-error">{{ error }}</div>
           <div class="issue-actions"><button type="button" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="submitting || !approvedExercises.length">{{ submitting ? '下发中…' : `确认下发给 ${selectedStudentIds.length} 人` }}</button></div>
         </form>

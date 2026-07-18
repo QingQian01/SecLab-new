@@ -32,7 +32,8 @@ describe('KnowledgeRiskPieChart', () => {
     expect(html).toContain('data-risk-key="72-回显位判断"')
     expect(html.match(/data-tone="attention"/g)).toHaveLength(2)
     expect(html).toContain('data-mastered-key="73-结果验证"')
-    expect(html).toContain('每个知识点都是独立扇区，同色不会合并')
+    expect(html).not.toContain('每个知识点都是独立扇区，同色不会合并')
+    expect(html).not.toContain('不绘制虚假的饼图面积')
   })
 
   it('renders deterministic knowledge evidence in the detail drawer', async () => {

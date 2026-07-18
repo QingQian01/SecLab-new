@@ -64,7 +64,8 @@ describe('KnowledgeAiAnalysisPanel', () => {
     expect(html).toContain('下发个性化练习')
     expect(html).toContain('先验证什么？')
     expect(html).not.toContain('怎样定位回显位？')
-    expect(html).toContain('审核通过的题目将按当前版本生成不可变快照')
+    expect(html).not.toContain('不可变快照')
+    expect(html).not.toContain('不会再次调用 AI')
   })
 
   it('does not expose the legacy unreviewed targeted-practice path', async () => {
@@ -76,7 +77,7 @@ describe('KnowledgeAiAnalysisPanel', () => {
     }))
 
     expect(html).not.toContain('<option value="TARGETED_PRACTICE"')
-    expect(html).toContain('专项练习请在知识点详情中审核例题后下发')
+    expect(html).not.toContain('专项练习请在知识点详情中审核例题后下发')
   })
 
   it('shows student completion and answer results in the teacher feedback loop', async () => {

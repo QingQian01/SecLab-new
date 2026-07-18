@@ -27,9 +27,56 @@ function pieRisk(overrides: Record<string, unknown> = {}) {
 describe('teaching analysis presentation', () => {
   it('uses pie-chart and experiment wording throughout the teacher page', () => {
     const pageSource = readFileSync(new URL('../index.vue', import.meta.url), 'utf8')
+    const pieSource = readFileSync(new URL('../components/KnowledgeRiskPieChart.vue', import.meta.url), 'utf8')
     expect(pageSource).not.toContain('热力图')
-    expect(pageSource).toContain('饼图')
     expect(pageSource).toContain('本实验')
+    expect(pieSource).toContain('知识点错误占比饼图')
+  })
+
+  it('does not expose implementation explanations to teachers', () => {
+    const componentNames = [
+      'CourseAnalysisPanel.vue',
+      'CourseQuestionRecords.vue',
+      'IssuePersonalizedPracticeDialog.vue',
+      'KnowledgeAiAnalysisPanel.vue',
+      'KnowledgeExerciseReview.vue',
+      'KnowledgeRiskPieChart.vue',
+      'TeachingActionPanel.vue',
+      'CapabilityEvidencePanel.vue',
+      'LearningReplayTimeline.vue',
+    ]
+    const source = componentNames
+      .map((name) => readFileSync(new URL(`../components/${name}`, import.meta.url), 'utf8'))
+      .join('\n')
+    for (const phrase of [
+      '每个知识点都是独立扇区，同色不会合并',
+      '不绘制虚假的饼图面积',
+      '由老师手动发起',
+      '不会凭空补人数或错误情况',
+      '生成不可变快照',
+      '不会再次调用 AI',
+      '三类题互相独立',
+      'Dify 恢复后',
+      '五维画像不作为题目分组',
+      '真实作答证据、画像和知识点饼图仍可正常查看',
+      '画像和学习记录持续同步',
+      '本实验知识点饼图和作答证据已经可用',
+      '题目生成并提交后，会自动',
+      '自动比较能力分数和错题表现',
+      '已同步到相关学生的画像页',
+      '点击任一能力，查看支撑分数',
+      '按时间还原“开始实验',
+    ]) expect(source).not.toContain(phrase)
+
+    const pageSource = readFileSync(new URL('../index.vue', import.meta.url), 'utf8')
+    for (const phrase of [
+      '真实作答证据、画像和知识点饼图仍可正常查看',
+      '画像和学习记录持续同步',
+      '本实验知识点饼图和作答证据已经可用',
+      '五维分数用于综合观察',
+      '已保留上一次成功结果',
+      'aiHealth.message',
+    ]) expect(pageSource).not.toContain(phrase)
   })
   it('maps risk levels to stable teacher-facing labels', () => {
     expect(getRiskPresentation('high')).toEqual({ label: '高风险', tone: 'danger' })

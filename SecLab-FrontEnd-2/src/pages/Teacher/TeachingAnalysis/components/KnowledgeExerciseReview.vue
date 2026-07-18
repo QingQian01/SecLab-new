@@ -68,7 +68,7 @@ async function regenerate() {
     emit('changed', await regenerateKnowledgeExercise(props.classId, props.exercise.exerciseId))
     editing.value = false
   } catch (reason) {
-    error.value = getApiErrorMessage(reason, 'AI 重新生成失败，原题已保留。')
+    error.value = getApiErrorMessage(reason, '重新生成失败，请稍后重试。')
   } finally {
     regenerating.value = false
   }
@@ -89,7 +89,7 @@ async function regenerate() {
       <label>生成目的<input v-model="draft.generationRationale" /></label>
       <label>难度<input v-model.number="draft.difficulty" type="number" min="1" max="5" /></label>
       <div class="editor-actions"><button type="button" @click="editing = false; resetDraft()">取消</button><button class="primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存修改' }}</button></div>
-      <p>修改后会自动回到“待审核”，必须再次审核通过才能下发。</p>
+      <p>修改后需重新审核。</p>
     </form>
     <template v-else>
       <h4>{{ exercise.stem }}</h4>

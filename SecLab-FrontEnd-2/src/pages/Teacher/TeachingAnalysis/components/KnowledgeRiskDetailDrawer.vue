@@ -107,7 +107,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <button ref="closeButton" type="button" class="drawer-close" aria-label="关闭知识点详情" @click="close">×</button>
         </header>
 
-        <div v-if="loading && !detail" class="drawer-state">正在读取真实作答证据…</div>
+        <div v-if="loading && !detail" class="drawer-state">正在加载知识点详情…</div>
         <div v-else-if="error && !detail" class="drawer-state error-state">{{ error }}<button type="button" @click="loadDetail()">重新加载</button></div>
         <div v-else class="drawer-content">
           <div v-if="error" class="inline-error">{{ error }} <button type="button" @click="loadDetail()">重试</button></div>

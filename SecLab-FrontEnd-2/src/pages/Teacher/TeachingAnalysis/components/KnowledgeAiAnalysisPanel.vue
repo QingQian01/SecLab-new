@@ -49,7 +49,7 @@ async function analyse() {
   try {
     data.value = await startKnowledgePointAiAnalysis(props.classId, props.courseId, props.knowledgePointId)
   } catch (reason) {
-    const failureMessage = getApiErrorMessage(reason, 'AI 分析失败；已有成功结果和已审核内容均已保留。')
+    const failureMessage = getApiErrorMessage(reason, 'AI 分析失败，请稍后重试。')
     try {
       data.value = await getKnowledgePointAiAnalysis(props.classId, props.courseId, props.knowledgePointId)
     } catch {
@@ -78,10 +78,10 @@ onMounted(() => {
 
 <template>
   <section class="ai-panel">
-    <header class="ai-head"><div><span>基于本知识点真实作答证据</span><h3>AI 分析与教师备课建议</h3></div><button type="button" :disabled="analysing" @click="analyse">{{ analysing ? 'AI 分析中…' : data?.analysis ? '重新分析' : '开始 AI 分析' }}</button></header>
-    <div v-if="error" class="ai-error">{{ error }}<small v-if="data?.analysis">下方仍展示最近一次成功结果。</small></div>
+    <header class="ai-head"><h3>AI 分析与教师备课建议</h3><button type="button" :disabled="analysing" @click="analyse">{{ analysing ? 'AI 分析中…' : data?.analysis ? '重新分析' : '开始 AI 分析' }}</button></header>
+    <div v-if="error" class="ai-error">{{ error }}</div>
     <div v-if="loading && !data" class="ai-state">正在读取分析记录…</div>
-    <div v-else-if="!data?.analysis" class="ai-empty"><strong>尚未生成本知识点 AI 分析</strong><p>由老师手动发起。AI 只使用当前实验、当前知识点的真实错误证据，不会凭空补人数或错误情况。</p></div>
+    <div v-else-if="!data?.analysis" class="ai-empty"><strong>暂无本知识点 AI 分析</strong></div>
     <template v-else>
       <section class="conclusion"><span>分析结论</span><p>{{ data.analysis.overallConclusion }}</p></section>
       <div class="advice-grid">
@@ -89,7 +89,7 @@ onMounted(() => {
         <section><h4>下节课教学建议</h4><article v-for="item in data.analysis.teachingAdvice" :key="item.title"><strong>{{ item.title }}</strong><p>{{ item.action }}</p></article></section>
       </div>
       <section class="exercise-section">
-        <header><div><h4>供老师审核的知识点例题</h4><p>三类题互相独立，可分别编辑、重新生成和审核。</p></div><strong>已审核通过 {{ approvedCount }}/{{ data.exercises.length }}</strong></header>
+        <header><h4>知识点例题</h4><strong>已审核通过 {{ approvedCount }}/{{ data.exercises.length }}</strong></header>
         <div class="exercise-list"><KnowledgeExerciseReview v-for="exercise in data.exercises" :key="exercise.exerciseId" :class-id="classId" :exercise="exercise" @changed="replaceExercise" /></div>
         <button class="issue-button" type="button" :disabled="approvedCount === 0" @click="issueOpen = true">下发已审核通过的练习</button>
       </section>

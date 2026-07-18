@@ -43,5 +43,6 @@ describe('TeacherAssignments', () => {
     expect(html).toContain('3 题')
     expect(html).toContain('平均 78.5 分')
     expect(html).toContain('查看作答结果')
+    expect(html).not.toContain('作答结果会回流给老师')
   })
 })

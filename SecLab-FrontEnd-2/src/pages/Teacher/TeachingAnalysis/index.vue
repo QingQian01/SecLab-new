@@ -270,7 +270,7 @@ async function runClassAnalysis() {
   classAnalysing.value = true
   classError.value = ''
   try { classAnalysis.value = await startTeachingClassAnalysis(selectedClassId.value) }
-  catch (error) { classError.value = getApiErrorMessage(error, '本次分析未完成，已保留上一次成功结果。') }
+  catch (error) { classError.value = getApiErrorMessage(error, '班级分析失败，请稍后重试。') }
   finally { classAnalysing.value = false }
 }
 
@@ -279,7 +279,7 @@ async function runStudentAnalysis() {
   studentAnalysing.value = true
   studentError.value = ''
   try { studentAnalysis.value = await startTeachingClassStudentAnalysis(selectedClassId.value, selectedStudentId.value) }
-  catch (error) { studentError.value = getApiErrorMessage(error, '本次分析未完成，已保留上一次成功结果。') }
+  catch (error) { studentError.value = getApiErrorMessage(error, '学生分析失败，请稍后重试。') }
   finally { studentAnalysing.value = false }
 }
 
@@ -325,7 +325,7 @@ onMounted(() => void loadClasses())
 <template>
   <div class="teacher-page analysis-page">
     <header class="page-head">
-      <div><h1>教学分析</h1><p>让每个能力结论都能追溯证据，并把发现直接转化为教学行动。</p></div>
+      <h1>教学分析</h1>
       <select v-model="selectedClassId" class="class-select" aria-label="选择教学班">
         <option v-for="item in classes" :key="item.teachingClassId" :value="item.teachingClassId">{{ item.academicYear }}学年 · 第{{ item.semester }}学期 · {{ item.className }}</option>
       </select>
@@ -333,10 +333,10 @@ onMounted(() => void loadClasses())
 
     <div v-if="loading" class="panel loading-state">正在加载教学班…</div>
     <div v-else-if="pageError" class="panel error-state">{{ pageError }} <button class="secondary-button" @click="loadClasses">重新加载</button></div>
-    <div v-else-if="!selectedClass" class="panel empty-state"><strong>还没有可分析的教学班</strong>先创建教学班并导入学生，学习数据会自动汇总到这里。</div>
+    <div v-else-if="!selectedClass" class="panel empty-state"><strong>暂无可分析的教学班</strong></div>
 
     <template v-else>
-      <div v-if="aiHealth && (!aiHealth.configured || !aiHealth.providerReachable)" class="notice warning analysis-notice">AI 分析服务：{{ aiHealth.message }}。真实作答证据、画像和知识点饼图仍可正常查看。</div>
+      <div v-if="aiHealth && (!aiHealth.configured || !aiHealth.providerReachable)" class="notice warning analysis-notice">AI 分析暂不可用，请稍后重试。</div>
       <section class="analysis-context panel">
         <div><span>当前教学班</span><strong>{{ selectedClass.className }}</strong><small>{{ selectedClass.academicYear }}学年 · 第{{ selectedClass.semester }}学期</small></div>
         <div class="context-stat"><span>本实验做题学生</span><strong>{{ classCourseQuestions?.summary.studentCount ?? 0 }}</strong></div>
@@ -345,7 +345,7 @@ onMounted(() => void loadClasses())
       </section>
 
       <section class="course-switcher panel">
-        <div class="course-switcher-title"><span>分析实验</span><strong>{{ selectedCourse?.courseName || '请选择实验' }}</strong><small>题目详情、学生分析和班级分析都以当前实验为范围</small></div>
+        <div class="course-switcher-title"><span>分析实验</span><strong>{{ selectedCourse?.courseName || '请选择实验' }}</strong></div>
         <div class="course-tabs" role="listbox" aria-label="选择分析实验"><button v-for="course in courses" :key="course.courseId" :class="{ active: selectedCourseId === course.courseId }" @click="selectedCourseId = course.courseId"><span>{{ course.teachingOrder }}</span>{{ course.courseName }}</button></div>
       </section>
       <div v-if="courseError" class="notice error analysis-notice">{{ courseError }}</div>
@@ -358,11 +358,11 @@ onMounted(() => void loadClasses())
         <div v-if="rebuildMessage" class="notice success analysis-notice">{{ rebuildMessage }}</div>
         <section class="panel result-panel"><CourseAnalysisPanel :data="classCourseAnalysis" :analysing="classCourseAnalysing" subject-label="班级" @analyse="runClassCourseAnalysis" /></section>
         <section class="panel result-panel"><CourseQuestionRecords :data="classCourseQuestions" :loading="courseDataLoading" scope-label="班级" /></section>
-        <div class="supplement-title"><strong>跨实验辅助统计</strong><span>以下风险统计与干预用于补充判断，不替代当前实验的题目分析。</span></div>
+        <div class="supplement-title"><strong>跨实验辅助统计</strong></div>
         <section class="panel result-panel">
-          <div class="panel-head"><div><h2>班级学习情况</h2><p v-if="classAnalysis?.analysis">最近分析：{{ formatDateTime(classAnalysis.generatedAt) }}</p><p v-else>画像和学习记录持续同步；AI 总结由教师手动发起。</p></div><div class="head-actions"><button class="secondary-button" :disabled="rebuildingProfiles" @click="rebuildProfiles">{{ rebuildingProfiles ? '正在更新画像…' : '更新32人画像' }}</button><button class="primary-button" :disabled="classAnalysing" @click="runClassAnalysis">{{ classAnalysing ? '正在分析…' : classAnalysis?.analysis ? '重新分析' : '开始分析' }}</button></div></div>
+          <div class="panel-head"><div><h2>班级学习情况</h2><p v-if="classAnalysis?.analysis">最近分析：{{ formatDateTime(classAnalysis.generatedAt) }}</p></div><div class="head-actions"><button class="secondary-button" :disabled="rebuildingProfiles" @click="rebuildProfiles">{{ rebuildingProfiles ? '正在更新画像…' : '更新32人画像' }}</button><button class="primary-button" :disabled="classAnalysing" @click="runClassAnalysis">{{ classAnalysing ? '正在分析…' : classAnalysis?.analysis ? '重新分析' : '开始分析' }}</button></div></div>
           <div v-if="classAnalysis?.analysis" class="result-body"><p class="overall-comment">{{ classAnalysis.analysis.overallComment }}</p><div v-if="classProblems.length" class="problem-list"><article v-for="(item,index) in classProblems" :key="`${item.title}-${index}`" class="problem-card" :class="{ expanded: expandedProblemIndex === index }" role="button" :tabindex="0" :aria-expanded="expandedProblemIndex === index" @click="toggleProblem(index)" @keydown.enter.prevent="toggleProblem(index)"><div class="problem-index">{{ index+1 }}</div><div class="problem-main"><div class="problem-title"><strong>{{ item.title }}</strong><div class="problem-title-actions"><span>涉及 {{ item.studentCount }} 人</span><button type="button" class="problem-detail-button" @click.stop="toggleProblem(index)">{{ expandedProblemIndex === index ? '收起详情' : '查看详情' }}</button></div></div><p>{{ item.evidence }}</p><div class="teacher-action"><span>教学建议</span>{{ item.teacherAction }}</div><div v-if="expandedProblemIndex === index" class="problem-detail" @click.stop><template v-if="problemRisk(item)"><div class="problem-detail-summary"><div><span>对应知识点</span><strong>{{ problemRisk(item)?.knowledgePointName }}</strong></div><div><span>风险等级</span><strong :class="`risk-${getRiskPresentation(problemRisk(item)?.riskLevel).tone}`">{{ getRiskPresentation(problemRisk(item)?.riskLevel).label }}</strong></div><div><span>错题率</span><strong>{{ Math.round(Number(problemRisk(item)?.incorrectRate || 0) * 100) }}%</strong></div><div><span>错误记录</span><strong>{{ problemRisk(item)?.incorrectCount || 0 }} 条</strong></div></div><div class="problem-detail-section"><h4>涉及学生</h4><div class="student-chips"><span v-for="student in problemRisk(item)?.affectedStudents || []" :key="student.studentId">{{ student.studentName || `学生 ${student.studentId}` }}</span></div></div><div class="problem-detail-section"><h4>代表性错题</h4><div v-for="question in problemRisk(item)?.representativeQuestions || []" :key="question.generatedQuestionId" class="question-row">{{ question.title }}<small>{{ question.generatedQuestionId }}</small></div></div><button type="button" class="problem-action-link" @click="selectRisk(problemRisk(item)!)">打开知识点详情与 AI 分析</button></template><template v-else><div class="problem-detail-section"><h4>证据题目</h4><div class="student-chips"><span v-for="questionId in item.questionIds" :key="questionId">{{ questionId }}</span></div><p>当前问题已有班级分析证据，但还没有匹配到本实验的知识点错误记录。</p></div></template></div></div></article></div></div>
-          <div v-else class="empty-state compact-empty"><strong>尚未进行班级 AI 分析</strong>本实验知识点饼图和作答证据已经可用；点击“开始分析”生成班级总结。</div>
+          <div v-else class="empty-state compact-empty"><strong>暂无班级 AI 分析</strong></div>
         </section>
         <section class="panel feature-panel"><KnowledgeRiskPieChart :items="riskItems" :selected-course-id="selectedCourseId!" @select="selectRisk" /></section>
         <KnowledgeRiskDetailDrawer
@@ -383,7 +383,7 @@ onMounted(() => void loadClasses())
           <main class="student-content">
             <section class="panel student-result-panel"><CourseAnalysisPanel :data="studentCourseAnalysis" :analysing="studentCourseAnalysing" :subject-label="selectedStudent ? `${selectedStudent.studentName || selectedStudent.studentNumber}的` : '学生'" @analyse="runStudentCourseAnalysis" /></section>
             <section class="panel student-result-panel"><CourseQuestionRecords :data="studentCourseQuestions" :loading="studentDataLoading || courseDataLoading" :scope-label="selectedStudent ? `${selectedStudent.studentName || selectedStudent.studentNumber}的` : '学生'" /></section>
-            <div class="supplement-title"><strong>跨实验五维画像（统计参考）</strong><span>五维分数用于综合观察，不作为本实验题目的分组方式。</span></div>
+            <div class="supplement-title"><strong>跨实验五维画像</strong></div>
             <section class="panel student-result-panel">
               <div v-if="!selectedStudent" class="empty-state"><strong>请选择学生</strong>从左侧名单选择一名学生查看学习情况。</div>
               <div v-else-if="studentDataLoading" class="loading-state">正在读取 {{ selectedStudent.studentName || selectedStudent.studentNumber }} 的学习数据…</div>

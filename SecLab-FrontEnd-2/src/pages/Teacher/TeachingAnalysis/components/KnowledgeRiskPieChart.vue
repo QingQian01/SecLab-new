@@ -74,7 +74,6 @@ onBeforeUnmount(() => chart?.destroy())
     <div class="section-heading">
       <div>
         <h2>本实验知识点错误分布</h2>
-        <p>扇区大小表示错误次数占比，颜色表示该知识点自身错题率；每个知识点都是独立扇区，同色不会合并。</p>
       </div>
       <div class="pie-summary"><strong>{{ model.slices.length + model.mastered.length }}</strong><span>个知识点</span><i></i><strong>{{ model.totalIncorrect }}</strong><span>次错误</span></div>
     </div>
@@ -107,10 +106,10 @@ onBeforeUnmount(() => chart?.destroy())
       </div>
     </div>
 
-    <div v-else class="all-mastered"><strong>当前实验暂未发现错误知识点</strong><span>已有作答整体表现良好，可点击下方知识点查看详细证据。</span></div>
+    <div v-else class="all-mastered"><strong>当前实验暂未发现错误知识点</strong></div>
 
     <section v-if="model.mastered.length" class="mastered-block">
-      <header><div><h3>掌握良好</h3><p>以下知识点错误次数为 0，不绘制虚假的饼图面积。</p></div><strong>{{ model.mastered.length }} 项</strong></header>
+      <header><h3>掌握良好</h3><strong>{{ model.mastered.length }} 项</strong></header>
       <div class="mastered-list">
         <button
           v-for="item in model.mastered"
@@ -122,7 +121,7 @@ onBeforeUnmount(() => chart?.destroy())
       </div>
     </section>
 
-    <div v-if="!model.slices.length && !model.mastered.length" class="empty-inline">本实验产生作答记录后，这里会按知识点形成错误分布。</div>
+    <div v-if="!model.slices.length && !model.mastered.length" class="empty-inline">本实验暂无知识点数据</div>
   </section>
 </template>
 

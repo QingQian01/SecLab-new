@@ -19,7 +19,7 @@ const score = (value?: number | null) => typeof value === 'number' ? value.toFix
 <template>
   <section class="evidence-block">
     <div class="section-heading">
-      <div><h3>能力分数与证据</h3><p>点击任一能力，查看支撑分数的实验、命令、报错和提示记录。</p></div>
+      <h3>能力分数与证据</h3>
       <small v-if="data?.computedAt">画像更新于 {{ new Date(data.computedAt).toLocaleString('zh-CN') }}</small>
     </div>
     <div v-if="data" class="dimension-tabs">
@@ -49,7 +49,7 @@ const score = (value?: number | null) => typeof value === 'number' ? value.toFix
       </div>
       <div v-else class="empty-inline">当前维度还没有可展开的学习证据。</div>
     </div>
-    <div v-else class="empty-inline">画像生成后，这里会显示能力分数及其证据来源。</div>
+    <div v-else class="empty-inline">暂无能力画像</div>
   </section>
 </template>
 
