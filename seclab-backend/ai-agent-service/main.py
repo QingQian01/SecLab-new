@@ -95,6 +95,7 @@ from teacher_course_analysis_service import (
 from teacher_learning_insight_repository import (
     get_capability_evidence,
     get_class_risk_map,
+    get_knowledge_risk_detail,
     get_learning_replay,
 )
 from teacher_intervention_repository import (
@@ -1909,6 +1910,44 @@ async def teacher_class_risk_map(
         return get_class_risk_map(
             int(current_user.get("user_id") or 0),
             class_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks")
+async def teacher_experiment_knowledge_risks(
+    class_id: int,
+    course_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_class_risk_map(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            course_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks/{knowledge_point_id}")
+async def teacher_experiment_knowledge_risk_detail(
+    class_id: int,
+    course_id: int,
+    knowledge_point_id: int,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_knowledge_risk_detail(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            course_id,
+            knowledge_point_id,
+            page,
+            size,
         )
     except Exception as exc:
         raise _teacher_repo_error(exc)

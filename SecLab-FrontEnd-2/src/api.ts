@@ -1003,14 +1003,32 @@ export interface KnowledgeRiskItemDto {
     attemptedCount: number;
     incorrectCount: number;
     incorrectRate: number;
-    riskLevel: "high" | "medium" | "low" | string;
+    errorShare?: number;
+    unansweredStudentCount?: number;
+    riskLevel: "high" | "medium" | "attention" | "good" | string;
     affectedStudents: Array<{ studentId: number; studentName: string }>;
     representativeQuestions: Array<{ generatedQuestionId: string; title: string }>;
 }
 
 export interface KnowledgeRiskMapResponseDto {
     teachingClassId: number;
+    courseId?: number | null;
     items: KnowledgeRiskItemDto[];
+}
+
+export interface KnowledgeRiskDetailDto extends KnowledgeRiskItemDto {
+    commonMistakes: Array<{ answer: string; count: number; studentCount: number }>;
+    representativeAttempts: Array<{
+        studentId: number;
+        studentName: string;
+        generatedQuestionId: string;
+        title: string;
+        answer: string;
+        standardAnswer: string;
+        score?: number | null;
+        submittedAt?: string | null;
+    }>;
+    pagination: { page: number; size: number; total: number };
 }
 
 export type TeacherInterventionActionType = "FOCUS_GROUP" | "TARGETED_PRACTICE" | "LESSON_EXAMPLE";
@@ -2499,6 +2517,31 @@ export async function getTeachingClassRiskMap(
     const response = await axios.get<KnowledgeRiskMapResponseDto>(
         `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/risk-map`,
         getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassExperimentRiskMap(
+    teachingClassId: number,
+    courseId: number,
+): Promise<KnowledgeRiskMapResponseDto> {
+    const response = await axios.get<KnowledgeRiskMapResponseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/experiments/${courseId}/knowledge-risks`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassKnowledgeRiskDetail(
+    teachingClassId: number,
+    courseId: number,
+    knowledgePointId: number,
+    page = 1,
+    size = 20,
+): Promise<KnowledgeRiskDetailDto> {
+    const response = await axios.get<KnowledgeRiskDetailDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/experiments/${courseId}/knowledge-risks/${knowledgePointId}`,
+        { params: { page, size }, ...getTeacherAgentAuthConfig() },
     );
     return response.data;
 }

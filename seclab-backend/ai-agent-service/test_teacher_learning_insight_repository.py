@@ -112,11 +112,69 @@ class TeacherLearningInsightHelpersTest(unittest.TestCase):
             "已完成 SQL 盲注验证",
         )
 
-    def test_risk_thresholds_require_enough_students_for_rate_only_risk(self):
-        self.assertEqual(insights.classify_risk(12, 8, 0.67), "high")
-        self.assertEqual(insights.classify_risk(10, 4, 0.4), "medium")
-        self.assertEqual(insights.classify_risk(2, 1, 0.5), "low")
-        self.assertEqual(insights.classify_risk(8, 1, 0.125), "low")
+    def test_risk_thresholds_match_the_four_colour_teacher_legend(self):
+        self.assertEqual(insights.classify_risk(12, 8, 0.60), "high")
+        self.assertEqual(insights.classify_risk(10, 4, 0.40), "medium")
+        self.assertEqual(insights.classify_risk(8, 2, 0.20), "attention")
+        self.assertEqual(insights.classify_risk(8, 1, 0.125), "good")
+
+    def test_risk_items_are_scoped_by_real_experiment_id_not_category_guessing(self):
+        rows = [
+            {
+                "course_id": 7,
+                "course_name": "SQL 注入攻击",
+                "teaching_order": 2,
+                "knowledge_point_id": 71,
+                "knowledge_point_name": "联合查询列数判断",
+                "knowledge_category": "SQL 注入",
+                "student_count": 10,
+                "attempted_student_count": 8,
+                "incorrect_student_count": 3,
+                "attempted_count": 10,
+                "incorrect_count": 3,
+                "affected_students": "261::陈宇航|||262::刘子涵",
+                "representative_questions": "q-1::列数判断",
+            },
+            {
+                "course_id": 8,
+                "course_name": "XSS 与 CSRF 攻击",
+                "teaching_order": 3,
+                "knowledge_point_id": 81,
+                "knowledge_point_name": "输出上下文编码",
+                "knowledge_category": "XSS",
+                "student_count": 10,
+                "attempted_student_count": 5,
+                "incorrect_student_count": 4,
+                "attempted_count": 5,
+                "incorrect_count": 4,
+            },
+        ]
+
+        result = insights.build_knowledge_risk_items(rows, course_id=7)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["courseId"], 7)
+        self.assertEqual(result[0]["knowledgePointId"], 71)
+        self.assertEqual(result[0]["riskLevel"], "attention")
+        self.assertEqual(result[0]["errorShare"], 1.0)
+
+    def test_risk_detail_groups_common_wrong_answers_without_ai(self):
+        result = insights.build_knowledge_risk_detail(
+            summary={"knowledgePointId": 71, "knowledgePointName": "联合查询列数判断"},
+            attempt_rows=[
+                {"student_id": 261, "student_name": "陈宇航", "answer_json": '"直接试 3 列"', "standard_answer": "先 ORDER BY", "title": "列数判断", "generated_question_id": "q-1", "score": 50},
+                {"student_id": 262, "student_name": "刘子涵", "answer_json": '"直接试 3 列"', "standard_answer": "先 ORDER BY", "title": "列数判断", "generated_question_id": "q-1", "score": 55},
+                {"student_id": 263, "student_name": "唐俊杰", "answer_json": '"没有验证"', "standard_answer": "先 ORDER BY", "title": "列数判断", "generated_question_id": "q-1", "score": 40},
+            ],
+            page=1,
+            size=2,
+        )
+
+        self.assertEqual(result["commonMistakes"][0]["answer"], "直接试 3 列")
+        self.assertEqual(result["commonMistakes"][0]["studentCount"], 2)
+        self.assertEqual(len(result["affectedStudents"]), 2)
+        self.assertEqual(result["pagination"], {"page": 1, "size": 2, "total": 3})
+        self.assertEqual(result["representativeAttempts"][0]["standardAnswer"], "先 ORDER BY")
 
     def test_knowledge_category_matches_teaching_schedule_or_marks_extension(self):
         courses = [

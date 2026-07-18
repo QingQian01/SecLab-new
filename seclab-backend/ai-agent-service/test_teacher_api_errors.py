@@ -8,6 +8,18 @@ from teacher_ai_analysis_service import provider_failure_message
 
 
 class TeacherApiErrorTest(unittest.TestCase):
+    def test_experiment_risk_routes_are_registered_without_teacher_id_parameters(self):
+        paths = {route.path for route in main.app.routes}
+
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks/{knowledge_point_id}",
+            paths,
+        )
+
     def test_teacher_auth_loads_owned_teaching_classes(self):
         connection = _FakeConnection(
             user={
