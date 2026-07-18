@@ -6,6 +6,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CANONICAL = ROOT / "database" / "sql" / "teacher_knowledge_analysis.sql"
 MIRROR = ROOT / "shujuku" / "teacher_knowledge_analysis.sql"
 PROFILE_INIT = ROOT / "database" / "sql" / "init_seclab_profile.sql"
+INTERVENTION = ROOT / "database" / "sql" / "teacher_intervention.sql"
+INTERVENTION_MIRROR = ROOT / "shujuku" / "teacher_intervention.sql"
 
 
 class TeacherKnowledgeAnalysisSchemaTest(unittest.TestCase):
@@ -29,6 +31,15 @@ class TeacherKnowledgeAnalysisSchemaTest(unittest.TestCase):
         ):
             self.assertIn(column, sql)
         self.assertIn("FOREIGN KEY (`analysis_id`)", sql)
+
+    def test_intervention_declares_course_and_immutable_exercise_snapshot(self):
+        for path in (INTERVENTION, INTERVENTION_MIRROR, PROFILE_INIT):
+            sql = path.read_text(encoding="utf-8")
+            self.assertIn("`course_id` INT NULL", sql)
+            self.assertIn("`teacher_intervention_exercise_snapshot`", sql)
+            self.assertIn("`source_exercise_id` BIGINT NOT NULL", sql)
+            self.assertIn("`source_version` INT NOT NULL", sql)
+            self.assertIn("`snapshot_json` LONGTEXT NOT NULL", sql)
 
 
 if __name__ == "__main__":

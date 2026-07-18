@@ -93,6 +93,19 @@ class TeacherApiErrorTest(unittest.TestCase):
         self.assertEqual(payload["source"], "teacher_assignment")
         self.assertEqual(payload["count"], 5)
 
+    def test_intervention_request_carries_approved_exercise_scope(self):
+        request = main.TeacherInterventionCreateRequest(
+            title="联合查询专项练习",
+            actionType="TARGETED_PRACTICE",
+            studentIds=[261, 262],
+            courseId=7,
+            knowledgePointId=71,
+            approvedExerciseIds=[31, 32],
+        )
+
+        self.assertEqual(request.courseId, 7)
+        self.assertEqual(request.approvedExerciseIds, [31, 32])
+
 
 class AiAnalysisHealthTest(unittest.IsolatedAsyncioTestCase):
     async def test_missing_dify_configuration_is_reported_without_secret_values(self):

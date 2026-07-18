@@ -3,15 +3,73 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from decimal import Decimal
+from copy import deepcopy
 from typing import Any, Optional
+from uuid import uuid4
 
 from database import get_connection
 from profile_repository import get_latest_student_profile
 from teacher_repository import USER_SERVICE_SCHEMA, require_owned_teaching_class
+from training_repository import create_training_session, save_generated_questions
 
 
 ACTION_TYPES = {"FOCUS_GROUP", "TARGETED_PRACTICE", "LESSON_EXAMPLE"}
 INTERVENTION_STATUSES = {"ACTIVE", "COMPLETED", "CANCELLED"}
+
+
+def build_approved_exercise_snapshots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        raise ValueError("至少选择一道已审核通过的例题")
+    snapshots = []
+    for row in rows:
+        if str(row.get("review_status") or "").upper() != "APPROVED":
+            raise ValueError("只有审核通过的例题可以下发")
+        snapshots.append(
+            {
+                "sourceExerciseId": int(row["exercise_id"]),
+                "sourceVersion": int(row.get("source_version") or 1),
+                "role": row.get("exercise_role"),
+                "questionType": row.get("question_type") or "short_answer",
+                "stem": row.get("stem") or "",
+                "options": deepcopy(_json_loads(row.get("options_json"), [])),
+                "standardAnswer": row.get("standard_answer") or "",
+                "explanation": row.get("explanation") or "",
+                "difficulty": int(row.get("difficulty") or 1),
+                "knowledgePointId": row.get("knowledge_point_id"),
+            }
+        )
+    return snapshots
+
+
+def build_snapshot_training_questions(
+    snapshots: list[dict[str, Any]],
+    intervention_id: int,
+) -> list[dict[str, Any]]:
+    role_labels = {
+        "FOUNDATION": "基础例题",
+        "CONSOLIDATION": "巩固例题",
+        "TRANSFER": "迁移例题",
+    }
+    questions = []
+    for snapshot in snapshots:
+        questions.append(
+            {
+                "question_id": f"assigned-{intervention_id}-{snapshot['sourceExerciseId']}-{uuid4()}",
+                "question_type": snapshot.get("questionType") or "short_answer",
+                "knowledge_point_id": snapshot.get("knowledgePointId"),
+                "difficulty": snapshot.get("difficulty") or 1,
+                "title": role_labels.get(str(snapshot.get("role") or "").upper(), "教师个性化练习"),
+                "stem": snapshot.get("stem") or "",
+                "options": deepcopy(snapshot.get("options") or []),
+                "answer": snapshot.get("standardAnswer") or "",
+                "reference_answer": snapshot.get("standardAnswer") or "",
+                "explanation": snapshot.get("explanation") or "",
+                "sourceExerciseId": snapshot.get("sourceExerciseId"),
+                "sourceVersion": snapshot.get("sourceVersion"),
+                "source": "teacher_approved_exercise",
+            }
+        )
+    return questions
 
 
 SCHEMA_STATEMENTS = (
@@ -20,6 +78,7 @@ SCHEMA_STATEMENTS = (
       intervention_id BIGINT NOT NULL AUTO_INCREMENT,
       teacher_id BIGINT NOT NULL,
       teaching_class_id BIGINT NOT NULL,
+      course_id INT NULL,
       title VARCHAR(255) NOT NULL,
       action_type VARCHAR(32) NOT NULL,
       knowledge_point_id BIGINT NULL,
@@ -34,6 +93,7 @@ SCHEMA_STATEMENTS = (
       KEY idx_intervention_teacher_time (teacher_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
+    "ALTER TABLE teacher_intervention ADD COLUMN IF NOT EXISTS course_id INT NULL AFTER teaching_class_id",
     """
     CREATE TABLE IF NOT EXISTS teacher_intervention_student (
       intervention_id BIGINT NOT NULL,
@@ -61,6 +121,20 @@ SCHEMA_STATEMENTS = (
       PRIMARY KEY (intervention_id, generated_question_id, usage_type),
       KEY idx_intervention_question (generated_question_id, created_at),
       CONSTRAINT fk_intervention_question_parent FOREIGN KEY (intervention_id)
+        REFERENCES teacher_intervention (intervention_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS teacher_intervention_exercise_snapshot (
+      snapshot_id BIGINT NOT NULL AUTO_INCREMENT,
+      intervention_id BIGINT NOT NULL,
+      source_exercise_id BIGINT NOT NULL,
+      source_version INT NOT NULL,
+      snapshot_json LONGTEXT NOT NULL,
+      created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      PRIMARY KEY (snapshot_id),
+      UNIQUE KEY uk_intervention_exercise_snapshot (intervention_id, source_exercise_id),
+      CONSTRAINT fk_intervention_exercise_snapshot_parent FOREIGN KEY (intervention_id)
         REFERENCES teacher_intervention (intervention_id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
@@ -187,16 +261,55 @@ def _validate_questions(cursor, class_id: int, question_ids: list[str]) -> None:
         raise PermissionError("intervention includes question outside selected teaching class")
 
 
+def _load_approved_exercises(
+    cursor,
+    *,
+    teacher_id: int,
+    class_id: int,
+    course_id: int,
+    knowledge_point_id: Optional[int],
+    exercise_ids: list[int],
+) -> list[dict[str, Any]]:
+    if not exercise_ids:
+        return []
+    placeholders = ", ".join(["%s"] * len(exercise_ids))
+    params: list[Any] = [teacher_id, class_id, course_id, *exercise_ids]
+    point_filter = ""
+    if knowledge_point_id is not None:
+        point_filter = "AND a.knowledge_point_id = %s"
+        params.append(knowledge_point_id)
+    cursor.execute(
+        f"""
+        SELECT e.*, a.knowledge_point_id
+        FROM teacher_knowledge_exercise e
+        INNER JOIN teacher_knowledge_analysis a ON a.analysis_id = e.analysis_id
+        WHERE a.teacher_id = %s
+          AND a.teaching_class_id = %s
+          AND a.course_id = %s
+          AND e.exercise_id IN ({placeholders})
+          {point_filter}
+        ORDER BY e.exercise_id
+        """,
+        params,
+    )
+    rows = list(cursor.fetchall() or [])
+    if {int(row["exercise_id"]) for row in rows} != set(exercise_ids):
+        raise PermissionError("exercise is outside selected teacher, class, experiment or knowledge point")
+    return rows
+
+
 def create_intervention(
     *,
     teacher_id: int,
     class_id: int,
+    course_id: Optional[int] = None,
     title: str,
     action_type: str,
     student_ids: list[int],
     knowledge_point_id: Optional[int] = None,
     description: str = "",
     question_ids: Optional[list[str]] = None,
+    approved_exercise_ids: Optional[list[int]] = None,
     due_at: Optional[datetime] = None,
 ) -> dict[str, Any]:
     action_type = str(action_type or "").upper()
@@ -206,6 +319,9 @@ def create_intervention(
         raise ValueError("intervention title is required")
     student_ids = sorted({int(value) for value in student_ids})
     question_ids = list(dict.fromkeys(str(value) for value in (question_ids or []) if str(value)))
+    approved_exercise_ids = sorted({int(value) for value in (approved_exercise_ids or [])})
+    if approved_exercise_ids and course_id is None:
+        raise ValueError("下发审核例题时必须指定实验")
     require_owned_teaching_class(teacher_id, class_id)
     ensure_intervention_schema()
     baseline_at = datetime.utcnow()
@@ -215,15 +331,24 @@ def create_intervention(
         with conn.cursor() as cursor:
             _validate_members(cursor, class_id, student_ids)
             _validate_questions(cursor, class_id, question_ids)
+            exercise_rows = _load_approved_exercises(
+                cursor,
+                teacher_id=teacher_id,
+                class_id=class_id,
+                course_id=int(course_id or 0),
+                knowledge_point_id=knowledge_point_id,
+                exercise_ids=approved_exercise_ids,
+            )
+            snapshots = build_approved_exercise_snapshots(exercise_rows) if exercise_rows else []
             cursor.execute(
                 """
                 INSERT INTO teacher_intervention (
-                    teacher_id, teaching_class_id, title, action_type,
+                    teacher_id, teaching_class_id, course_id, title, action_type,
                     knowledge_point_id, description, status, baseline_at, due_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s)
                 """,
                 (
-                    teacher_id, class_id, str(title).strip(), action_type,
+                    teacher_id, class_id, course_id, str(title).strip(), action_type,
                     knowledge_point_id, str(description or "").strip(), baseline_at, due_at,
                 ),
             )
@@ -248,6 +373,20 @@ def create_intervention(
                     """,
                     (intervention_id, question_id, usage_type),
                 )
+            for snapshot in snapshots:
+                cursor.execute(
+                    """
+                    INSERT INTO teacher_intervention_exercise_snapshot (
+                      intervention_id, source_exercise_id, source_version, snapshot_json
+                    ) VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        intervention_id,
+                        snapshot["sourceExerciseId"],
+                        snapshot["sourceVersion"],
+                        _json_dumps(snapshot),
+                    ),
+                )
         conn.commit()
     return get_intervention(teacher_id, class_id, intervention_id)
 
@@ -257,6 +396,7 @@ def _serialize_intervention(row: dict[str, Any]) -> dict[str, Any]:
         "interventionId": int(row["intervention_id"]),
         "teacherId": int(row["teacher_id"]),
         "teachingClassId": int(row["teaching_class_id"]),
+        "courseId": row.get("course_id"),
         "title": row.get("title"),
         "actionType": row.get("action_type"),
         "knowledgePointId": row.get("knowledge_point_id"),
@@ -509,3 +649,79 @@ def mark_student_assignment_started(
             )
         conn.commit()
     return {**get_student_assignment(student_id, intervention_id), "startedNow": True}
+
+
+def load_intervention_exercise_snapshots(intervention_id: int) -> list[dict[str, Any]]:
+    ensure_intervention_schema()
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT snapshot_json
+                FROM teacher_intervention_exercise_snapshot
+                WHERE intervention_id = %s
+                ORDER BY snapshot_id
+                """,
+                (intervention_id,),
+            )
+            rows = list(cursor.fetchall() or [])
+    return [_json_loads(row.get("snapshot_json"), {}) for row in rows]
+
+
+def start_student_assignment_from_snapshots(
+    student_id: int,
+    intervention_id: int,
+) -> Optional[dict[str, Any]]:
+    assignment = get_student_assignment(student_id, intervention_id)
+    if assignment.get("trainingSessionId"):
+        return {**assignment, "startedNow": False, "generation": None}
+    snapshots = load_intervention_exercise_snapshots(intervention_id)
+    if not snapshots:
+        return None
+    profile = get_latest_student_profile(student_id)
+    training_context = {
+        "source": "teacher_approved_exercise",
+        "interventionId": intervention_id,
+        "knowledgePointId": assignment.get("knowledgePointId"),
+        "approvedExerciseIds": [item.get("sourceExerciseId") for item in snapshots],
+    }
+    session = create_training_session(
+        user_id=student_id,
+        class_id=assignment.get("teachingClassId"),
+        course_id=assignment.get("courseId"),
+        profile_snapshot_id=(profile or {}).get("snapshot_id"),
+        diagnose_result={
+            "user_id": student_id,
+            "weak_knowledge_points": [assignment.get("knowledgePointId")],
+            "source": "teacher_approved_exercise",
+        },
+        training_context=training_context,
+    )
+    questions = build_snapshot_training_questions(snapshots, intervention_id)
+    saved = save_generated_questions(
+        training_session_id=str(session["training_session_id"]),
+        questions=questions,
+        source_model="teacher_approved",
+    )
+    started = mark_student_assignment_started(
+        student_id,
+        intervention_id,
+        str(session["training_session_id"]),
+    )
+    return {
+        **started,
+        "generation": {
+            "success": True,
+            "trainingSessionId": session["training_session_id"],
+            "count": len(saved),
+            "questions": [
+                {
+                    "generatedQuestionId": item.get("generated_question_id"),
+                    "title": item.get("title"),
+                    "stem": item.get("stem"),
+                }
+                for item in saved
+            ],
+            "metadata": {"generator": "teacher_approved", "mode": "reviewed_exercise_snapshot"},
+        },
+    }

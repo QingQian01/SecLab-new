@@ -111,6 +111,7 @@ from teacher_intervention_repository import (
     list_student_assignments,
     mark_student_assignment_started,
     refresh_intervention_metrics,
+    start_student_assignment_from_snapshots,
     update_intervention_status,
 )
 
@@ -460,9 +461,11 @@ class TeacherInterventionCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     actionType: str
     studentIds: list[int] = Field(min_length=1)
+    courseId: Optional[int] = None
     knowledgePointId: Optional[int] = None
     description: Optional[str] = Field(default="", max_length=2000)
     questionIds: list[str] = Field(default_factory=list)
+    approvedExerciseIds: list[int] = Field(default_factory=list)
     dueAt: Optional[datetime] = None
 
 
@@ -1813,6 +1816,9 @@ async def student_start_teacher_assignment(
                 "startedNow": False,
                 "generation": None,
             }
+        snapshot_result = start_student_assignment_from_snapshots(student_id, intervention_id)
+        if snapshot_result is not None:
+            return snapshot_result
         generation = await generate_training_question_set(
             _build_teacher_assignment_training_request(student_id, assignment)
         )
@@ -2079,12 +2085,14 @@ async def teacher_create_class_intervention(
         return create_intervention(
             teacher_id=int(current_user.get("user_id") or 0),
             class_id=class_id,
+            course_id=request.courseId,
             title=request.title,
             action_type=request.actionType,
             student_ids=request.studentIds,
             knowledge_point_id=request.knowledgePointId,
             description=request.description or "",
             question_ids=request.questionIds,
+            approved_exercise_ids=request.approvedExerciseIds,
             due_at=request.dueAt,
         )
     except Exception as exc:

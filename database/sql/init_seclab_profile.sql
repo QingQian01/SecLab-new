@@ -785,6 +785,7 @@ CREATE TABLE IF NOT EXISTS `teacher_intervention` (
   `intervention_id` BIGINT NOT NULL AUTO_INCREMENT,
   `teacher_id` BIGINT NOT NULL,
   `teaching_class_id` BIGINT NOT NULL,
+  `course_id` INT NULL,
   `title` VARCHAR(255) NOT NULL,
   `action_type` VARCHAR(32) NOT NULL,
   `knowledge_point_id` BIGINT NULL,
@@ -824,6 +825,19 @@ CREATE TABLE IF NOT EXISTS `teacher_intervention_question` (
   PRIMARY KEY (`intervention_id`, `generated_question_id`, `usage_type`),
   KEY `idx_intervention_question` (`generated_question_id`, `created_at`),
   CONSTRAINT `fk_intervention_question_parent`
+    FOREIGN KEY (`intervention_id`) REFERENCES `teacher_intervention` (`intervention_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `teacher_intervention_exercise_snapshot` (
+  `snapshot_id` BIGINT NOT NULL AUTO_INCREMENT,
+  `intervention_id` BIGINT NOT NULL,
+  `source_exercise_id` BIGINT NOT NULL,
+  `source_version` INT NOT NULL,
+  `snapshot_json` LONGTEXT NOT NULL,
+  `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`snapshot_id`),
+  UNIQUE KEY `uk_intervention_exercise_snapshot` (`intervention_id`, `source_exercise_id`),
+  CONSTRAINT `fk_intervention_exercise_snapshot_parent`
     FOREIGN KEY (`intervention_id`) REFERENCES `teacher_intervention` (`intervention_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
