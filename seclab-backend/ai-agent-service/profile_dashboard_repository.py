@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Optional
@@ -6,7 +7,7 @@ from typing import Any, Optional
 from class_profile_repository import ensure_class_profile_schema
 from database import get_connection
 from lab_repository import ensure_lab_schema
-from profile_repository import ensure_profile_schema
+from profile_repository import ensure_profile_schema, _repair_double_encoded_utf8
 from question_repository import ensure_question_schema
 
 
@@ -64,13 +65,25 @@ def _serialize_time(value: Any) -> str:
     return str(value or "")
 
 
+def _repair_json_strings(obj: Any) -> Any:
+    """递归修复 JSON 对象中所有字符串值的双重编码问题。"""
+    if isinstance(obj, str):
+        return _repair_double_encoded_utf8(obj)
+    if isinstance(obj, dict):
+        return {key: _repair_json_strings(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_repair_json_strings(item) for item in obj]
+    return obj
+
+
 def _json_loads(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
-        return value
+        return _repair_json_strings(value)
     if not value:
         return {}
     try:
-        return json.loads(value)
+        parsed = json.loads(value)
+        return _repair_json_strings(parsed)
     except (TypeError, json.JSONDecodeError):
         return {}
 
@@ -117,8 +130,12 @@ def _total_score(cursor, user_id: int) -> int:
         cursor,
         """
         SELECT
-            COALESCE((SELECT SUM(score) FROM question_submission WHERE user_id = %(user_id)s), 0)
-            + COALESCE((SELECT SUM(score) FROM flag_submission WHERE user_id = %(user_id)s), 0)
+            COALESCE((SELECT SUM(max_score) FROM (
+                SELECT MAX(score) as max_score FROM question_submission WHERE user_id = %(user_id)s GROUP BY question_id
+            ) q), 0)
+            + COALESCE((SELECT SUM(max_score) FROM (
+                SELECT MAX(score) as max_score FROM flag_submission WHERE user_id = %(user_id)s GROUP BY module_id, task_id
+            ) f), 0)
             AS total
         """,
         {"user_id": user_id},
