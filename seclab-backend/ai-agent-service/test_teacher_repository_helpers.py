@@ -63,6 +63,7 @@ class TeacherRepositoryHelperTest(unittest.TestCase):
     def test_generated_question_record_is_live_data_not_review_workflow(self):
         row = {
             "generated_question_id": "gq-1",
+            "training_session_id": "session-course-2",
             "user_id": 21,
             "user_student_number": "20260001",
             "user_name": "张晨",
@@ -92,6 +93,7 @@ class TeacherRepositoryHelperTest(unittest.TestCase):
         item = teacher_repository.map_generated_question_record(row)
 
         self.assertEqual(item["teachingClassId"], 101)
+        self.assertEqual(item["trainingSessionId"], "session-course-2")
         self.assertEqual(item["generationReason"], "学生在上下文判断上连续出错")
         self.assertTrue(item["isTypical"])
         self.assertFalse(item["latestAttempt"]["isCorrect"])

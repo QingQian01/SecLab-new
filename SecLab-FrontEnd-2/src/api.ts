@@ -52,6 +52,10 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
     }
 
     const status = error.response.status;
+    const responseData = error.response.data as { detail?: unknown } | undefined;
+    const responseDetail = typeof responseData?.detail === "string"
+        ? responseData.detail.trim()
+        : "";
     if (status === 401) {
         return "登录状态已失效，请重新登录。";
     }
@@ -71,6 +75,9 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
         return "请求过于频繁，请稍后重试。";
     }
     if (status >= 500) {
+        if (responseDetail) {
+            return responseDetail;
+        }
         return "数据加载失败，请重新加载。";
     }
     return fallback;
@@ -450,7 +457,7 @@ export interface TrainingQuestionSetRequest {
     difficulty: number;
     questionType: "SHORT_ANSWER";
     count?: number;
-    source: "student_profile_snapshot";
+    source: "student_profile_snapshot" | "teacher_assignment";
 }
 
 export interface TrainingQuestionGradingRubricItem {
@@ -755,6 +762,7 @@ export interface TeachingClassImportResultDto {
 
 export interface TeacherGeneratedQuestionRecord {
     generatedQuestionId: string;
+    trainingSessionId?: string | null;
     student: { studentId: number; studentNumber?: string | null; studentName: string };
     teachingClassId: number;
     teachingClassName: string;
@@ -782,6 +790,97 @@ export interface TeacherGeneratedQuestionRecord {
     attemptCount: number;
     generatedAt?: string | null;
     isTypical: boolean;
+    attemptHistory?: TeacherQuestionAttemptDto[];
+}
+
+export interface TeacherQuestionAttemptDto {
+    attemptId: string;
+    answer: unknown;
+    isCorrect?: boolean | null;
+    score: number;
+    costTime?: number | null;
+    submittedAt?: string | null;
+}
+
+export interface TeacherCourseQuestionSummaryDto {
+    studentCount: number;
+    questionCount: number;
+    attemptedQuestionCount: number;
+    attemptCount: number;
+    correctQuestionCount: number;
+    incorrectQuestionCount: number;
+    accuracyRate: number;
+    averageScore: number;
+    students: Array<{
+        studentId: number;
+        studentName: string;
+        studentNumber?: string | null;
+        questionCount: number;
+        attemptCount: number;
+        correctQuestionCount: number;
+        incorrectQuestionCount: number;
+        accuracyRate: number;
+    }>;
+    knowledgePoints: Array<{
+        knowledgePointName: string;
+        questionCount: number;
+        attemptCount: number;
+        correctQuestionCount: number;
+        incorrectQuestionCount: number;
+        affectedStudentCount: number;
+        accuracyRate: number;
+    }>;
+}
+
+export interface TeacherCourseQuestionsDto {
+    success: boolean;
+    teachingClassId: number;
+    course: { courseId: number; courseName: string };
+    studentId?: number | null;
+    items: TeacherGeneratedQuestionRecord[];
+    summary: TeacherCourseQuestionSummaryDto;
+}
+
+export interface TeacherCourseAnalysisDto {
+    teacherId: number;
+    teachingClassId: number;
+    courseId: number;
+    scope: "CLASS" | "STUDENT" | string;
+    studentId?: number | null;
+    analysisStatus: "IDLE" | "RUNNING" | "READY" | "FAILED" | string;
+    analysis?: {
+        scope: "class_course" | "student_course" | string;
+        courseId: number;
+        courseName: string;
+        generatedBy: string;
+        fallbackUsed: boolean;
+        providerMessage?: string | null;
+        generatedAt?: string | null;
+        overallComment: string;
+        summary?: TeacherCourseQuestionSummaryDto;
+        knowledgeFindings?: Array<{
+            knowledgePointName: string;
+            evidence?: string;
+            teacherAction?: string;
+            incorrectQuestionCount?: number;
+            affectedStudentCount?: number;
+            accuracyRate?: number;
+        }>;
+        representativeMistakes?: Array<{
+            generatedQuestionId: string;
+            title: string;
+            studentName?: string | null;
+            knowledgePointName?: string | null;
+            latestAnswer?: unknown;
+            standardAnswer?: unknown;
+            score?: number | null;
+        }>;
+        teachingSuggestions?: string[];
+        [key: string]: unknown;
+    } | null;
+    sourceStats?: TeacherCourseQuestionSummaryDto | null;
+    lastErrorMessage?: string | null;
+    generatedAt?: string | null;
 }
 
 export interface TeacherGeneratedQuestionPage {
@@ -839,6 +938,131 @@ export interface TeachingStudentAnalysisDto {
     generatedAt?: string | null;
     dataCutoffAt?: string | null;
     lastErrorMessage?: string | null;
+}
+
+export interface AiAnalysisHealthDto {
+    configured: boolean;
+    providerReachable: boolean;
+    message: string;
+}
+
+export interface CapabilityEvidenceItemDto {
+    kind: "LAB_START" | "COMMAND" | "ERROR" | "HINT" | "AI" | "ATTEMPT" | "SUCCESS" | string;
+    occurredAt?: string | null;
+    sourceId: string;
+    title: string;
+    detail?: string;
+    status?: string;
+    labSessionId?: string | null;
+    moduleId?: number | null;
+    taskId?: number | null;
+    command?: string;
+    commandCategory?: string | null;
+    exitCode?: number | null;
+    retryOutcome?: "success" | "recovered" | "unresolved" | "pending" | string;
+    errorCategory?: string | null;
+    severity?: string | null;
+    score?: number;
+    isCorrect?: boolean;
+    aiAskCount?: number;
+}
+
+export interface CapabilityDimensionDto {
+    key: "knowledge_mastery" | "troubleshooting" | "autonomy" | "ai_collaboration" | "engagement" | string;
+    label: string;
+    score?: number | null;
+    summary: string;
+    evidence: CapabilityEvidenceItemDto[];
+}
+
+export interface CapabilityEvidenceResponseDto {
+    teachingClassId: number;
+    studentId: number;
+    profileSnapshotId?: string | null;
+    computedAt?: string | null;
+    overallScore?: number | null;
+    dimensions: CapabilityDimensionDto[];
+}
+
+export interface LearningReplayResponseDto {
+    teachingClassId: number;
+    studentId: number;
+    items: CapabilityEvidenceItemDto[];
+}
+
+export interface KnowledgeRiskItemDto {
+    courseId?: number | null;
+    courseName: string;
+    teachingOrder?: number | null;
+    knowledgePointId?: number | null;
+    knowledgePointName: string;
+    knowledgeCategory: string;
+    studentCount: number;
+    attemptedStudentCount: number;
+    incorrectStudentCount: number;
+    attemptedCount: number;
+    incorrectCount: number;
+    incorrectRate: number;
+    riskLevel: "high" | "medium" | "low" | string;
+    affectedStudents: Array<{ studentId: number; studentName: string }>;
+    representativeQuestions: Array<{ generatedQuestionId: string; title: string }>;
+}
+
+export interface KnowledgeRiskMapResponseDto {
+    teachingClassId: number;
+    items: KnowledgeRiskItemDto[];
+}
+
+export type TeacherInterventionActionType = "FOCUS_GROUP" | "TARGETED_PRACTICE" | "LESSON_EXAMPLE";
+
+export interface TeacherInterventionStudentDto {
+    studentId: number;
+    studentNumber?: string | null;
+    studentName?: string | null;
+    assignmentStatus: "PENDING" | "STARTED" | "COMPLETED" | string;
+    trainingSessionId?: string | null;
+    startedAt?: string | null;
+    completedAt?: string | null;
+    baseline?: Record<string, unknown> | null;
+    latest?: Record<string, unknown> | null;
+    comparison?: {
+        delta: Record<string, number>;
+        improvedDimensions: string[];
+        status: string;
+    };
+}
+
+export interface TeacherInterventionDto {
+    interventionId: number;
+    teacherId: number;
+    teachingClassId: number;
+    title: string;
+    actionType: TeacherInterventionActionType;
+    knowledgePointId?: number | null;
+    description: string;
+    status: "ACTIVE" | "COMPLETED" | "CANCELLED" | string;
+    baselineAt: string;
+    dueAt: string;
+    createdAt: string;
+    updatedAt: string;
+    students: TeacherInterventionStudentDto[];
+    questions: Array<{ generatedQuestionId: string; title: string; usageType: string }>;
+    progress: {
+        studentCount: number;
+        completedCount: number;
+        completionRate: number;
+        evaluationDue: boolean;
+    };
+}
+
+export interface StudentTeacherAssignmentDto extends TeacherInterventionDto {
+    className?: string | null;
+    teacherName?: string | null;
+    knowledgePointName?: string | null;
+    assignmentStatus: "PENDING" | "STARTED" | "COMPLETED" | string;
+    trainingSessionId?: string | null;
+    startedAt?: string | null;
+    completedAt?: string | null;
 }
 
 export interface TeacherUserListItemDto {
@@ -2125,6 +2349,56 @@ export async function getGeneratedQuestionSummary(teachingClassId: number): Prom
     return response.data;
 }
 
+export async function getTeacherClassCourseQuestions(
+    teachingClassId: number,
+    courseId: number,
+): Promise<TeacherCourseQuestionsDto> {
+    const response = await axios.get<TeacherCourseQuestionsDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}/questions`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeacherStudentCourseQuestions(
+    teachingClassId: number,
+    courseId: number,
+    studentId: number,
+): Promise<TeacherCourseQuestionsDto> {
+    const response = await axios.get<TeacherCourseQuestionsDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}/students/${studentId}/questions`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeacherCourseAnalysis(
+    teachingClassId: number,
+    courseId: number,
+    studentId?: number | null,
+): Promise<TeacherCourseAnalysisDto> {
+    const suffix = studentId ? `/students/${studentId}` : '';
+    const response = await axios.get<TeacherCourseAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}${suffix}/ai-analysis`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function startTeacherCourseAnalysis(
+    teachingClassId: number,
+    courseId: number,
+    studentId?: number | null,
+): Promise<TeacherCourseAnalysisDto> {
+    const suffix = studentId ? `/students/${studentId}` : '';
+    const response = await axios.post<TeacherCourseAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/courses/${courseId}${suffix}/ai-analysis`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
 export async function getTeachingClassAnalysis(teachingClassId: number): Promise<TeachingClassAnalysisDto> {
     const response = await axios.get<TeachingClassAnalysisDto>(
         `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/ai-analysis`,
@@ -2172,6 +2446,136 @@ export async function startTeachingClassStudentAnalysis(
         `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}/ai-analysis`,
         null,
         getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getAiAnalysisHealth(): Promise<AiAnalysisHealthDto> {
+    const response = await axios.get<AiAnalysisHealthDto>(`${AGENT_BASE_URL}/health/ai-analysis`);
+    return response.data;
+}
+
+export async function rebuildTeachingClassProfiles(teachingClassId: number): Promise<{
+    teachingClassId: number;
+    studentCount: number;
+    rebuiltCount: number;
+    failedCount: number;
+    failures: Array<{ studentId: number; message: string }>;
+}> {
+    const response = await axios.post(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/profiles/rebuild`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassStudentCapabilityEvidence(
+    teachingClassId: number,
+    studentId: number,
+): Promise<CapabilityEvidenceResponseDto> {
+    const response = await axios.get<CapabilityEvidenceResponseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}/capability-evidence`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassStudentLearningReplay(
+    teachingClassId: number,
+    studentId: number,
+    limit = 100,
+): Promise<LearningReplayResponseDto> {
+    const response = await axios.get<LearningReplayResponseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}/learning-replay`,
+        { params: { limit }, ...getTeacherAgentAuthConfig() },
+    );
+    return response.data;
+}
+
+export async function getTeachingClassRiskMap(
+    teachingClassId: number,
+): Promise<KnowledgeRiskMapResponseDto> {
+    const response = await axios.get<KnowledgeRiskMapResponseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/risk-map`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassInterventions(
+    teachingClassId: number,
+): Promise<{ teachingClassId: number; items: TeacherInterventionDto[] }> {
+    const response = await axios.get(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/interventions`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function createTeachingClassIntervention(
+    teachingClassId: number,
+    payload: {
+        title: string;
+        actionType: TeacherInterventionActionType;
+        studentIds: number[];
+        knowledgePointId?: number | null;
+        description?: string;
+        questionIds?: string[];
+        dueAt?: string | null;
+    },
+): Promise<TeacherInterventionDto> {
+    const response = await axios.post<TeacherInterventionDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/interventions`,
+        payload,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function refreshTeachingClassIntervention(
+    teachingClassId: number,
+    interventionId: number,
+): Promise<TeacherInterventionDto> {
+    const response = await axios.post<TeacherInterventionDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/interventions/${interventionId}/refresh`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function updateTeachingClassInterventionStatus(
+    teachingClassId: number,
+    interventionId: number,
+    status: "ACTIVE" | "COMPLETED" | "CANCELLED",
+): Promise<TeacherInterventionDto> {
+    const response = await axios.patch<TeacherInterventionDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/interventions/${interventionId}`,
+        { status },
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getStudentTeacherAssignments(
+    studentId: number,
+): Promise<{ studentId: number; items: StudentTeacherAssignmentDto[] }> {
+    const response = await axios.get(
+        `${AGENT_BASE_URL}/api/students/${studentId}/teacher-assignments`,
+        getBearerAuthConfig("当前没有登录态 token，无法读取教师布置任务。"),
+    );
+    return response.data;
+}
+
+export async function startStudentTeacherAssignment(
+    studentId: number,
+    interventionId: number,
+): Promise<StudentTeacherAssignmentDto & { startedNow: boolean; generation?: TrainingQuestionSetResponse | null }> {
+    const response = await axios.post(
+        `${AGENT_BASE_URL}/api/students/${studentId}/teacher-assignments/${interventionId}/start`,
+        null,
+        getBearerAuthConfig("当前没有登录态 token，无法开始教师布置任务。"),
     );
     return response.data;
 }
