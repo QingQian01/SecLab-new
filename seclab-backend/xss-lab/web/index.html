@@ -360,7 +360,7 @@
                     <span class="difficulty difficulty-medium">中等</span>
                 </div>
                 <div class="challenge-meta-item">
-                    <span class="challenge-meta-label">状�?</span>
+                    <span class="challenge-meta-label">状�?</span>
                     <span class="status-indicator status-online"></span>
                     <span>在线</span>
                 </div>
@@ -385,7 +385,7 @@
             
             <div class="action-buttons">
                 <button class="action-button" onclick="openChallenge()">
-                    <i class="icon">🚀</i>开始挑�?
+                    <i class="icon">🚀</i>开始挑�?
                 </button>
                 <button class="action-button" onclick="showHints()">
                     <i class="icon">💡</i>查看提示
@@ -403,23 +403,23 @@
             <div class="challenge-desc">
                 <h3>挑战描述</h3>
                 <p>
-                    跨站脚本攻击（XSS）是一种常见的Web安全漏洞，攻击者可以在网页中插入恶意脚本�?
-                    在这个挑战中，你需要利用XSS漏洞来执行JavaScript代码，窃取用户Cookie，并最终获取Flag�?
+                    跨站脚本攻击（XSS）是一种常见的Web安全漏洞，攻击者可以在网页中插入恶意脚本�?
+                    在这个挑战中，你需要利用XSS漏洞来执行JavaScript代码，窃取用户Cookie，并最终获取Flag�?
                 </p>
                 
                 <h3>挑战目标</h3>
                 <ul>
                     <li>完成3个递进的XSS挑战步骤</li>
-                    <li>学习不同类型的XSS攻击技�?/li>
+                    <li>学习不同类型的XSS攻击技�?/li>
                     <li>理解XSS漏洞的危害和防护方法</li>
                     <li>获取最终的Flag</li>
                 </ul>
                 
-                <h3>技术要�?/h3>
+                <h3>技术要�?/h3>
                 <ul>
                     <li>反射型XSS攻击</li>
-                    <li>HTML事件处理器利�?/li>
-                    <li>Cookie窃取技�?/li>
+                    <li>HTML事件处理器利�?/li>
+                    <li>Cookie窃取技�?/li>
                     <li>XSS防护绕过</li>
                 </ul>
             </div>
@@ -435,9 +435,9 @@
                 <ul>
                     <li>尝试在留言板中插入JavaScript代码</li>
                     <li>使用 <code>&lt;script&gt;</code> 标签执行代码</li>
-                    <li>利用HTML事件处理器如 <code>onerror</code>�?code>onload</code></li>
+                    <li>利用HTML事件处理器如 <code>onerror</code>�?code>onload</code></li>
                     <li>尝试窃取用户的Cookie信息</li>
-                    <li>注意观察页面是否执行了你的代�?/li>
+                    <li>注意观察页面是否执行了你的代�?/li>
                 </ul>
             </div>
         </div>
@@ -450,7 +450,7 @@
                 <h3>确认重置</h3>
                 <button class="modal-close" onclick="closeModal('resetModal')">&times;</button>
             </div>
-            <p>确定要重置XSS实验环境吗？这将清除所有数据�?/p>
+            <p>确定要重置XSS实验环境吗？这将清除所有数据�?/p>
             <div class="modal-footer">
                 <button class="modal-btn modal-btn-cancel" onclick="closeModal('resetModal')">取消</button>
                 <button class="modal-btn modal-btn-confirm" onclick="confirmReset()">确认重置</button>
@@ -461,7 +461,7 @@
     <script>
         function copyToClipboard(text) {
             navigator.clipboard.writeText(text).then(function() {
-                alert('已复制到剪贴�? ' + text);
+                alert('已复制到剪贴�? ' + text);
             }).catch(function(err) {
                 console.error('复制失败: ', err);
             });
@@ -472,7 +472,7 @@
         }
         
         function showHints() {
-            alert('提示：\n1. 尝试在留言中输�?<script>alert("XSS")</script>\n2. 使用图片标签的onerror事件\n3. 尝试窃取document.cookie');
+            alert('提示：\n1. 尝试在留言中输�?<script>alert("XSS")</script>\n2. 使用图片标签的onerror事件\n3. 尝试窃取document.cookie');
         }
         
         function showSolution() {
@@ -488,20 +488,23 @@
         }
         
         function confirmReset() {
-            alert('环境重置功能需要手动重启Docker容器');
             closeModal('resetModal');
+            // 跳转到 PHP 端 reset=1，PHP 会清空当前会话的留言并重置 token
+            const stepMatch = window.location.href.match(/[?&]step=(\d+)/);
+            const step = stepMatch ? stepMatch[1] : '1';
+            window.location.href = 'index.php?step=' + step + '&reset=1';
         }
         
         function submitFlag() {
             const flag = document.getElementById('flagInput').value;
             if (flag.includes('flag{') && flag.includes('}')) {
-                alert('Flag提交成功！恭喜完成XSS挑战�?);
+                alert('Flag提交成功！恭喜完成XSS挑战�?);
             } else {
                 alert('Flag格式错误，请检查后重新提交');
             }
         }
         
-        // 检查环境状�?
+        // 检查环境状�?
         function checkStatus() {
             fetch('http://192.168.1.106:8092')
                 .then(response => {
@@ -519,10 +522,10 @@
                 });
         }
         
-        // 页面加载时检查状�?
+        // 页面加载时检查状�?
         window.onload = function() {
             checkStatus();
-            // �?0秒检查一次状�?
+            // �?0秒检查一次状�?
             setInterval(checkStatus, 30000);
         };
 

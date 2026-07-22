@@ -56,16 +56,18 @@ const BusinessLogicVulnerability = {
           content: '以下哪种行为属于水平越权？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['普通用户访问管理员功能', '用户A查看用户B的订单信息', '游客访问需要登录的页面', '绕过验证码登录']
+          type: 'single-choice',
+          options: ['普通用户访问管理员功能', '用户A查看用户B的订单信息', '游客访问需要登录的页面', '绕过验证码登录'],
+          answer: [1]
         },
         {
           id: 2,
           content: '检测越权漏洞最有效的方法是什么？',
           score: 7,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['比较不同角色的Cookie值', '使用不同权限账号测试相同接口', '检查HTTP响应头', '分析JavaScript代码']
+          type: 'single-choice',
+          options: ['比较不同角色的Cookie值', '使用不同权限账号测试相同接口', '检查HTTP响应头', '分析JavaScript代码'],
+          answer: [1]
         }
       ]
     },
@@ -81,16 +83,18 @@ const BusinessLogicVulnerability = {
           content: '支付金额篡改漏洞通常出现在哪个环节？',
           score: 8,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['生成订单时', '支付过程中', '前端显示时', '支付完成后']
+          type: 'single-choice',
+          options: ['生成订单时', '支付过程中', '前端显示时', '支付完成后'],
+          answer: [1]
         },
         {
           id: 2,
           content: '以下哪种方式无法有效防止订单重放攻击？',
           score: 7,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['使用订单唯一标识', '设置订单有效期', '记录IP地址', '使用HTTPS传输']
+          type: 'single-choice',
+          options: ['使用订单唯一标识', '设置订单有效期', '记录IP地址', '使用HTTPS传输'],
+          answer: [3]
         }
       ]
     }
@@ -118,16 +122,18 @@ const IntranetPenetration = {
           content: '在Windows域环境中，以下哪个命令可以查询域控制器信息？',
           score: 8,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['net user', 'nltest /dclist', 'ipconfig /all', 'tasklist']
+          type: 'single-choice',
+          options: ['net user', 'nltest /dclist', 'ipconfig /all', 'tasklist'],
+          answer: [1]
         },
         {
           id: 2,
           content: '在内网信息收集阶段，以下哪个工具不适合进行大规模端口扫描？',
           score: 7,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['Nmap', 'Masscan', 'Responder', 'Zmap']
+          type: 'single-choice',
+          options: ['Nmap', 'Masscan', 'Responder', 'Zmap'],
+          answer: [2]
         }
       ]
     },
@@ -143,16 +149,18 @@ const IntranetPenetration = {
           content: '哈希传递攻击(Pass-The-Hash)主要利用了Windows身份验证中的哪个协议的特性？',
           score: 8,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['Kerberos', 'NTLM', 'Digest', 'Basic']
+          type: 'single-choice',
+          options: ['Kerberos', 'NTLM', 'Digest', 'Basic'],
+          answer: [1]
         },
         {
           id: 2,
           content: '以下哪个工具不能用于横向移动？',
           score: 10,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['Mimikatz', 'PsExec', 'WMI', 'Wireshark']
+          type: 'single-choice',
+          options: ['Mimikatz', 'PsExec', 'WMI', 'Wireshark'],
+          answer: [3]
         }
       ]
     }
@@ -180,16 +188,18 @@ const CodeAudit = {
           content: '在PHP语言中，以下哪个函数最容易导致命令注入漏洞？',
           score: 6,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['echo', 'system', 'strlen', 'array_push']
+          type: 'single-choice',
+          options: ['echo', 'system', 'strlen', 'array_push'],
+          answer: [1]
         },
         {
           id: 2,
           content: '污点分析的主要目的是什么？',
           score: 9,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['优化代码性能', '检测死代码', '跟踪用户输入到危险函数的传播路径', '统计代码行数']
+          type: 'single-choice',
+          options: ['优化代码性能', '检测死代码', '跟踪用户输入到危险函数的传播路径', '统计代码行数'],
+          answer: [2]
         }
       ]
     },
@@ -205,16 +215,18 @@ const CodeAudit = {
           content: '对CMS系统进行代码审计时，首先应当分析哪个部分？',
           score: 9,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['数据库配置文件', '页面模板', '请求处理入口', 'JavaScript文件']
+          type: 'single-choice',
+          options: ['数据库配置文件', '页面模板', '请求处理入口', 'JavaScript文件'],
+          answer: [2]
         },
         {
           id: 2,
           content: '在代码审计过程中发现SQL注入漏洞后，应如何负责任地处理？',
           score: 9,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['立即公开漏洞细节', '私下出售漏洞', '向开发者报告并给予修复时间', '在社交媒体发布但不给出细节']
+          type: 'single-choice',
+          options: ['立即公开漏洞细节', '私下出售漏洞', '向开发者报告并给予修复时间', '在社交媒体发布但不给出细节'],
+          answer: [2]
         }
       ]
     }
@@ -242,16 +254,18 @@ const CTFPractice = {
           content: 'CTF比赛中的Web题目通常更侧重于测试哪方面能力？',
           score: 7,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['UI设计能力', '代码优化能力', '漏洞利用技巧', '数据库设计能力']
+          type: 'single-choice',
+          options: ['UI设计能力', '代码优化能力', '漏洞利用技巧', '数据库设计能力'],
+          answer: [2]
         },
         {
           id: 2,
           content: '面对一个未知的Web应用，CTF选手通常会首先进行哪项操作？',
           score: 8,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['查看源代码', '测试默认凭据', '进行SQL注入', '分析网站架构']
+          type: 'single-choice',
+          options: ['查看源代码', '测试默认凭据', '进行SQL注入', '分析网站架构'],
+          answer: [0]
         }
       ]
     },
@@ -267,16 +281,18 @@ const CTFPractice = {
           content: '开发CTF工具框架时，以下哪种编程语言因其丰富的安全工具库而被广泛使用？',
           score: 8,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['C#', 'Python', 'Pascal', 'Swift']
+          type: 'single-choice',
+          options: ['C#', 'Python', 'Pascal', 'Swift'],
+          answer: [1]
         },
         {
           id: 2,
           content: '在CTF自动化工具中，以下哪个功能对Web题目最不重要？',
           score: 10,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['HTTP请求构造', 'Cookie管理', '3D图形渲染', '响应解析']
+          type: 'single-choice',
+          options: ['HTTP请求构造', 'Cookie管理', '3D图形渲染', '响应解析'],
+          answer: [2]
         }
       ]
     }
@@ -304,16 +320,18 @@ const RedTeamArsenal = {
           content: 'Cobalt Strike中，哪个组件负责在受感染主机上执行命令？',
           score: 7,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['Team Server', 'Beacon', 'Listener', 'Stager']
+          type: 'single-choice',
+          options: ['Team Server', 'Beacon', 'Listener', 'Stager'],
+          answer: [1]
         },
         {
           id: 2,
           content: '为避免被安全设备检测，Cobalt Strike的Malleable C2配置主要修改什么内容？',
           score: 8,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['杀毒软件规则', '网络流量特征', '操作系统设置', '用户权限']
+          type: 'single-choice',
+          options: ['杀毒软件规则', '网络流量特征', '操作系统设置', '用户权限'],
+          answer: [1]
         }
       ]
     },
@@ -329,16 +347,18 @@ const RedTeamArsenal = {
           content: '杀毒软件主要通过哪种方式检测已知木马？',
           score: 8,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['特征码匹配', 'IP地址追踪', '操作系统版本检测', '硬件信息比对']
+          type: 'single-choice',
+          options: ['特征码匹配', 'IP地址追踪', '操作系统版本检测', '硬件信息比对'],
+          answer: [0]
         },
         {
           id: 2,
           content: '以下哪种技术不属于木马免杀方法？',
           score: 10,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['代码混淆', '分离加载', '数据加密', '硬件虚拟化']
+          type: 'single-choice',
+          options: ['代码混淆', '分离加载', '数据加密', '硬件虚拟化'],
+          answer: [3]
         }
       ]
     }
@@ -366,16 +386,18 @@ const VulnerabilityMethodology = {
           content: '以下哪个不是有效的Fuzzing策略？',
           score: 6,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['随机变异', '基于覆盖率的反馈', '基于语法的生成', '逐字节递增']
+          type: 'single-choice',
+          options: ['随机变异', '基于覆盖率的反馈', '基于语法的生成', '逐字节递增'],
+          answer: [3]
         },
         {
           id: 2,
           content: 'AFL(American Fuzzy Lop)的核心优势是什么？',
           score: 9,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['GUI界面易用', '基于代码覆盖率的反馈机制', '兼容所有操作系统', '内置漏洞利用生成器']
+          type: 'single-choice',
+          options: ['GUI界面易用', '基于代码覆盖率的反馈机制', '兼容所有操作系统', '内置漏洞利用生成器'],
+          answer: [1]
         }
       ]
     },

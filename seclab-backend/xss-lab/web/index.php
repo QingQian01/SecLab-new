@@ -19,6 +19,33 @@ $step = isset($_GET['step']) ? intval($_GET['step']) : 1;
 if ($step < 1) $step = 1;
 if ($step > 3) $step = 3;
 
+// 为当前实验用户生成/获取独立会话 token（用于只渲染当前用户输入的留言）
+// 每次浏览器首次访问会得到一个新的 token，避免不同实验者之间互相触发历史 XSS 弹窗
+$labToken = isset($_COOKIE['xss_lab_token']) ? $_COOKIE['xss_lab_token'] : '';
+if (!preg_match('/^[a-zA-Z0-9]{16,64}$/', $labToken)) {
+    $labToken = bin2hex(random_bytes(16));
+    setcookie('xss_lab_token', $labToken, [
+        'expires' => 0,
+        'path' => '/',
+        'samesite' => 'Lax',
+        'httponly' => false,
+    ]);
+    $_COOKIE['xss_lab_token'] = $labToken;
+}
+
+// 处理"重置环境"操作：清空当前会话的留言并重置 cookie
+if (isset($_GET['reset']) && $_GET['reset'] === '1') {
+    try {
+        $delStmt = $pdo->prepare("DELETE FROM messages WHERE session_id = ?");
+        $delStmt->execute([$labToken]);
+    } catch (PDOException $e) {
+        // 旧表可能没有 session_id 字段，忽略错误
+    }
+    setcookie('xss_lab_token', '', time() - 3600, '/');
+    header("Location: index.php?step=$step");
+    exit();
+}
+
 // 处理留言提交
 $success = false;
 $input = '';
@@ -28,11 +55,18 @@ if ($_POST && isset($_POST['username']) && isset($_POST['message'])) {
     $username = $_POST['username'];
     $message = $_POST['message'];
     $input = $message;
-    
+
     // 这里故意不进行XSS过滤，用于实验
-    $stmt = $pdo->prepare("INSERT INTO messages (username, message) VALUES (?, ?)");
-    $stmt->execute([$username, $message]);
-    
+    // 写入时携带当前会话 token，便于按用户隔离渲染
+    try {
+        $stmt = $pdo->prepare("INSERT INTO messages (username, message, session_id) VALUES (?, ?, ?)");
+        $stmt->execute([$username, $message, $labToken]);
+    } catch (PDOException $e) {
+        // 兼容旧表：缺少 session_id 字段时降级
+        $stmt = $pdo->prepare("INSERT INTO messages (username, message) VALUES (?, ?)");
+        $stmt->execute([$username, $message]);
+    }
+
     // 检查是否成功
     switch ($step) {
         case 1:
@@ -54,14 +88,20 @@ if ($_POST && isset($_POST['username']) && isset($_POST['message'])) {
             }
             break;
     }
-    
+
     header("Location: index.php?step=$step&success=" . ($success ? '1' : '0') . "&input=" . urlencode($input));
     exit();
 }
 
-// 获取所有留言
-$stmt = $pdo->query("SELECT * FROM messages ORDER BY created_at DESC");
-$messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// 获取当前会话的留言（仅渲染当前实验者自己提交的，避免历史 payload 反复弹窗）
+try {
+    $stmt = $pdo->prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC");
+    $stmt->execute([$labToken]);
+    $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    // 兼容旧表：缺少 session_id 字段时直接返回空，避免历史全部弹窗
+    $messages = [];
+}
 
 // 步骤标题和说明
 $steps = [

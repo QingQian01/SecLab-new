@@ -19,8 +19,26 @@ CREATE TABLE IF NOT EXISTS messages (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL,
     message TEXT NOT NULL,
+    session_id VARCHAR(64) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- 兼容旧库：给已存在的 messages 表补上 session_id 字段
+SET @add_session_id = (
+    SELECT IF(
+        EXISTS(
+            SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = 'xss_lab'
+              AND TABLE_NAME = 'messages'
+              AND COLUMN_NAME = 'session_id'
+        ),
+        'SELECT 1',
+        'ALTER TABLE messages ADD COLUMN session_id VARCHAR(64) NULL AFTER message, ADD INDEX idx_messages_session (session_id)'
+    )
+);
+PREPARE stmt FROM @add_session_id;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 插入测试数据
 INSERT INTO users (username, password, email) VALUES

@@ -18,7 +18,7 @@ export const SQLInjectionExperiment = {
           content: '以下哪个是用于从数据库获取数据的SQL语句？',
           score: 2,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['INSERT', 'SELECT', 'UPDATE', 'DELETE'],
           answer: [1] // SELECT
         },
@@ -27,7 +27,7 @@ export const SQLInjectionExperiment = {
           content: 'WHERE子句在SQL查询中的作用是什么？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['指定要检索的列', '指定要查询的表', '过滤满足特定条件的行', '对结果进行排序'],
           answer: [2] // 过滤满足特定条件的行
         }
@@ -46,7 +46,7 @@ export const SQLInjectionExperiment = {
           content: 'MySQL数据库中获取版本信息的函数是？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['@@version', 'version()', 'getVersion()', 'v$version'],
           answer: [0] // @@version
         },
@@ -55,9 +55,9 @@ export const SQLInjectionExperiment = {
           content: '以下哪种注释语法是MySQL特有的？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['-- 注释', '/* 注释 */', '# 注释', '// 注释'],
-          answer: [0] // -- 注释
+          answer: [1] // # 注释
         }
       ]
     },
@@ -74,7 +74,7 @@ export const SQLInjectionExperiment = {
           content: '以下哪种方法最适合用来初步判断是否存在SQL注入漏洞？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['输入大量随机字符', '尝试输入单引号', '使用JavaScript代码', '修改HTTP头信息'],
           answer: [1] // 尝试输入单引号
         },
@@ -83,7 +83,7 @@ export const SQLInjectionExperiment = {
           content: '使用`AND 1=2`进行注入测试，预期的结果是什么？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['返回所有记录', '返回第一条记录', '返回错误信息', '不返回任何记录'],
           answer: [3] // 不返回任何记录
         }
@@ -179,7 +179,7 @@ export const SQLInjectionExperiment = {
           content: 'SQL注入漏洞产生的根本原因是？',
           score: 2,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['数据库软件本身存在漏洞', '操作系统安全配置不足', '应用程序未对用户输入进行充分的安全处理', '网络防火墙配置不当'],
           answer: [2] // 应用程序未对用户输入进行充分的安全处理
         },
@@ -188,7 +188,7 @@ export const SQLInjectionExperiment = {
           content: '以下哪个是SQL注入攻击的主要目标？',
           score: 1,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['数据库服务器', 'Web服务器', '客户端浏览器', '操作系统'],
           answer: [0] // 数据库服务器
         },
@@ -197,16 +197,16 @@ export const SQLInjectionExperiment = {
           content: '攻击者通过SQL注入可以实现以下哪些目的？',
           score: 1,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['绕过身份验证', '获取数据库敏感数据', '修改或删除数据库数据', '以上所有'],
-          answer: [0, 1, 2, 3] // 以上所有
+          answer: [3] // 以上所有（逻辑上涵盖前三个选项）
         },
         {
           id: 4,
           content: '在URL参数 `http://example.com/products.php?id=1` 中，哪个部分最有可能成为SQL注入的注入点？',
           score: 1,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['http://example.com', 'products.php', '?', 'id=1'],
           answer: [2] // ?
         },
@@ -215,7 +215,7 @@ export const SQLInjectionExperiment = {
           content: '为了有效防止SQL注入，开发者应该采取的主要措施是？',
           score: 2,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['使用强密码', '使用参数化查询 (或预编译语句)', '安装防火墙', '定期备份数据'],
           answer: [1] // 使用参数化查询 (或预编译语句)
         },
@@ -224,7 +224,7 @@ export const SQLInjectionExperiment = {
           content: '以下哪种SQL注入类型是利用 `UNION` 关键字来合并查询结果的？',
           score: 1,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['盲注 (Blind SQL Injection)', '联合查询注入 (Union-based SQL Injection)', '报错注入 (Error-based SQL Injection)', '布尔盲注 (Boolean-based Blind SQL Injection)'],
           answer: [1] // 联合查询注入 (Union-based SQL Injection)
         },
@@ -233,7 +233,7 @@ export const SQLInjectionExperiment = {
           content: '在SQL注入语句中，`--` 的作用是？',
           score: 1,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['执行SQL语句', '注释掉后面的SQL语句', '分隔SQL语句', '定义变量'],
           answer: [1] // 注释掉后面的SQL语句
         },
@@ -242,7 +242,7 @@ export const SQLInjectionExperiment = {
           content: "如果在一个登录表单的用户名输入框中输入 `' OR '1'='1 --`，最有可能发生的情况是？",
           score: 1,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['网站崩溃', '成功绕过登录验证', '账号被锁定', '输入被视为普通的用户名'],
           answer: [1] // 成功绕过登录验证
         }
@@ -261,7 +261,7 @@ export const SQLInjectionExperiment = {
           content: '防御SQL注入的最佳方法是什么？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['使用正则表达式过滤用户输入', '使用参数化查询（预编译语句）', '禁用错误显示', '限制数据库连接数'],
           answer: [1] // 使用参数化查询（预编译语句）
         },
@@ -270,7 +270,7 @@ export const SQLInjectionExperiment = {
           content: '以下哪个不是有效的SQL注入防御措施？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['使用ORM框架', '对用户输入进行白名单验证', '简单地用replace()函数删除单引号', '实施最小权限原则'],
           answer: [2] // 简单地用replace()函数删除单引号
         }
@@ -289,7 +289,7 @@ export const SQLInjectionExperiment = {
           content: '以下哪种技术不能用于绕过WAF对SQL注入的检测？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['使用大小写混合', '在关键词中插入注释', '使用十六进制编码', '直接清除浏览器缓存'],
           answer: [3] // 直接清除浏览器缓存
         },
@@ -298,7 +298,7 @@ export const SQLInjectionExperiment = {
           content: '以下哪个SQL语句可能用于绕过WAF检测？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['SELECT * FROM users', 'SE/**/LECT * FROM users', 'select * from users', 'SELECT FROM users *'],
           answer: [1] // SE/**/LECT * FROM users
         }

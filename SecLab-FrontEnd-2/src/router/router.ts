@@ -187,7 +187,7 @@ router.beforeEach((to) => {
                 return true;
             }
 
-            return { path: "/user/profile" };
+            return { path: "/user/welcome" };
         })
         .catch((error) => {
             console.error("路由鉴权失败:", error);

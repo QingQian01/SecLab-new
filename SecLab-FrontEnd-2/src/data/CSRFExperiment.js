@@ -17,16 +17,18 @@ export const CSRFExperiment = {
           content: 'CSRF攻击的全称是什么？',
           score: 2,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['Cross-Site Request Forgery', 'Cross-Server Resource Fetch', 'Client-Side Redirection Failure', 'Content Security Risk Factor']
+          type: 'single-choice',
+          options: ['Cross-Site Request Forgery', 'Cross-Server Resource Fetch', 'Client-Side Redirection Failure', 'Content Security Risk Factor'],
+          answer: [0] // Cross-Site Request Forgery
         },
         {
           id: 2,
           content: 'CSRF攻击成功的先决条件是什么？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['攻击者获取到用户密码', '用户已登录目标网站且会话有效', '目标网站使用HTTP协议', '用户点击确认按钮']
+          type: 'single-choice',
+          options: ['攻击者获取到用户密码', '用户已登录目标网站且会话有效', '目标网站使用HTTP协议', '用户点击确认按钮'],
+          answer: [1] // 用户已登录目标网站且会话有效
         }
       ]
     },
@@ -42,16 +44,18 @@ export const CSRFExperiment = {
           content: 'GET型CSRF攻击通常使用什么HTML元素来发起请求？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['<script>标签', '<img>标签', '<button>标签', '<div>标签']
+          type: 'single-choice',
+          options: ['<script>标签', '<img>标签', '<button>标签', '<div>标签'],
+          answer: [1] // <img>标签
         },
         {
           id: 2,
           content: '为什么XMLHttpRequest方式的CSRF攻击通常较难成功？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['因为它需要用户交互', '因为同源策略的限制', '因为它不能发送Cookie', '因为它只能发送GET请求']
+          type: 'single-choice',
+          options: ['因为它需要用户交互', '因为同源策略的限制', '因为它不能发送Cookie', '因为它只能发送GET请求'],
+          answer: [1] // 因为同源策略的限制
         }
       ]
     },
@@ -67,16 +71,18 @@ export const CSRFExperiment = {
           content: '以下哪种方法被认为是防御CSRF攻击最有效的方法？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['使用HTTPS协议', '实现CSRF Token机制', '禁用JavaScript', '缩短会话有效期']
+          type: 'single-choice',
+          options: ['使用HTTPS协议', '实现CSRF Token机制', '禁用JavaScript', '缩短会话有效期'],
+          answer: [1] // 实现CSRF Token机制
         },
         {
           id: 2,
           content: 'SameSite Cookie属性设置为"Strict"时意味着什么？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['Cookie在所有请求中都会发送', 'Cookie永远不会发送', 'Cookie只在同站请求中发送', 'Cookie在1小时后过期']
+          type: 'single-choice',
+          options: ['Cookie在所有请求中都会发送', 'Cookie永远不会发送', 'Cookie只在同站请求中发送', 'Cookie在1小时后过期'],
+          answer: [2] // Cookie只在同站请求中发送
         }
       ]
     },
@@ -92,16 +98,18 @@ export const CSRFExperiment = {
           content: '在第一个案例中，攻击者是如何绕过用户登录验证的？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['攻击者窃取了用户的密码', '攻击者破解了会话机制', '攻击者利用了用户已登录的状态', '攻击者修改了服务器响应']
+          type: 'single-choice',
+          options: ['攻击者窃取了用户的密码', '攻击者破解了会话机制', '攻击者利用了用户已登录的状态', '攻击者修改了服务器响应'],
+          answer: [2] // 攻击者利用了用户已登录的状态
         },
         {
           id: 2,
           content: '在第二个案例中，什么配置错误使CSRF攻击成为可能？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['设置了过长的会话超时时间', '配置不当的CORS策略', '没有使用HTTPS', '服务器防火墙配置错误']
+          type: 'single-choice',
+          options: ['设置了过长的会话超时时间', '配置不当的CORS策略', '没有使用HTTPS', '服务器防火墙配置错误'],
+          answer: [1] // 配置不当的CORS策略
         }
       ]
     },
@@ -200,7 +208,8 @@ export const CSRFExperiment = {
             '<script>alert("You have been hacked!")</script>',
             '<a href="https://bank.example/transfer?to=attacker&amount=1000">Click here</a>',
             '<input type="text" name="username" value="admin">'
-          ]
+          ],
+          answer: [0] // <img src="..."> (GET型CSRF攻击)
         },
         {
           id: 3,

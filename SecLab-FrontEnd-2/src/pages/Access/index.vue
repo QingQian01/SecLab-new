@@ -93,12 +93,12 @@ const handleRegister = async (registerForm: RegisterForm) => {
 </script>
 
 <template>
-  <div class="min-h-screen flex bg-gradient-to-br from-base-300 via-base-200 to-base-100 relative overflow-hidden">
+  <div class="min-h-screen flex bg-gradient-to-br from-base-300 via-base-200 to-base-100 relative overflow-y-auto">
     <div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-secondary/10"></div>
 
     <SideBrand class="animate-slide-in-left" />
 
-    <div class="flex-1 flex items-center justify-center p-4">
+    <div class="flex-1 flex items-start justify-center p-4 overflow-y-auto" style="max-height: 100vh;">
       <div class="card w-full max-w-2xl bg-base-100/95 shadow-2xl border border-base-200 backdrop-blur">
         <div class="card-body p-8 md:p-10">
           <div class="flex items-center justify-center gap-3 mb-6">

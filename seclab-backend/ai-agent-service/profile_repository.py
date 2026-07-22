@@ -1,4 +1,5 @@
 import json
+import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -6,6 +7,86 @@ from uuid import uuid4
 
 from database import ensure_database, get_connection
 from knowledge_repository import build_knowledge_tags
+
+
+def _repair_double_encoded_utf8(text: str) -> str:
+    """检测并修复因编码错误导致的乱码（mojibake）。
+
+    覆盖场景：
+    1. UTF-8 数据被错误地以 Latin-1/CP1252 解码（如 "Ã©" → "é"）
+    2. UTF-8 字节被错误地以 GBK 解码后显示为乱码 CJK 字符
+       （如 "与CSRF基础实验" → "涓嶤SRF鍩虹瀹為獙"）
+
+    安全策略：只在确认是乱码时修复，避免把正确中文也"修复"成乱码。
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    # 纯 ASCII 不需要修复
+    if text.isascii():
+        return text
+
+    # 统计特征字符
+    latin1_high = sum(1 for ch in text if 0x80 <= ord(ch) <= 0xFF)
+    contains_cjk = _contains_cjk(text)
+
+    # 策略 1：Latin-1/CP1252 → UTF-8（安全：仅当存在 0x80-0xFF 字符时触发，
+    #          正确中文均在 U+4E00 以上，不会被误修复）
+    if latin1_high > 0:
+        for enc in ("latin-1", "cp1252", "iso-8859-15"):
+            try:
+                repaired = text.encode(enc).decode("utf-8")
+                if repaired != text and _contains_cjk(repaired):
+                    return repaired
+            except (UnicodeDecodeError, UnicodeEncodeError):
+                pass
+
+    # 策略 2：GBK → UTF-8
+    # 触发条件：文本包含 CJK 且不含 Latin-1 高位字节（0x80-0xFF）。
+    # 这里【不再】要求同时包含 ASCII 字母，因为纯 CJK 乱码
+    # （如 "鐭ヨ瘑鎺屾彙" → "知识掌握"）同样需要修复。
+    #
+    # 安全性：正确的 UTF-8 中文（如 "知识掌握度偏低"）先 encode 成 GBK 字节，
+    # 再以 UTF-8 解码时，几乎必然抛 UnicodeDecodeError 或得到非 CJK 结果，
+    # 会被下方 `_contains_cjk(repaired)` 拦截，不会被误"修复"成乱码。
+    if contains_cjk and latin1_high == 0:
+        for enc in ("gb18030", "gbk"):
+            try:
+                repaired = text.encode(enc).decode("utf-8")
+                if repaired != text and _contains_cjk(repaired):
+                    return repaired
+            except (UnicodeDecodeError, UnicodeEncodeError):
+                pass
+
+    # 策略 3：包含 "?" 的疑似乱码（原始字节不可逆丢失的场景）
+    # "?" 是编码链路中某些环节因不可识别字符而替换的结果
+    if "?" in text and contains_cjk and len(text) < 60:
+        for enc in ("gbk", "gb18030"):
+            try:
+                repaired = text.encode(enc).decode("utf-8", errors="replace")
+                repaired = repaired.replace("\ufffd", "")
+                if _contains_cjk(repaired) and sum(1 for c in repaired if c == "?") < sum(1 for c in text if c == "?"):
+                    return repaired
+            except (UnicodeDecodeError, UnicodeEncodeError):
+                pass
+
+    return text
+
+
+def _contains_cjk(text: str) -> bool:
+    """检查文本是否包含中日韩统一表意文字。"""
+    return bool(re.search(r"[一-鿿㐀-䶿]", text))
+
+
+def _repair_row_encoding(row: dict[str, Any], text_keys: list[str]) -> dict[str, Any]:
+    """对字典中指定键的字符串值进行编码修复。"""
+    if not row:
+        return row
+    for key in text_keys:
+        value = row.get(key)
+        if isinstance(value, str):
+            row[key] = _repair_double_encoded_utf8(value)
+    return row
 
 
 STUDENT_PROFILE_SNAPSHOT_TABLE_SQL = """
@@ -623,7 +704,7 @@ def _table_exists(cursor, schema: str, table: str) -> bool:
 def _load_catalog_resources(cursor) -> dict[str, list[dict[str, Any]]]:
     resources: dict[str, list[dict[str, Any]]] = {"courses": [], "modules": []}
     if _table_exists(cursor, "userservice", "course"):
-        resources["courses"] = _fetch_all(
+        raw_courses = _fetch_all(
             cursor,
             """
             SELECT
@@ -638,8 +719,12 @@ def _load_catalog_resources(cursor) -> dict[str, list[dict[str, Any]]]:
             """,
             {},
         )
+        resources["courses"] = [
+            _repair_row_encoding(row, ["course_name", "course_description"])
+            for row in raw_courses
+        ]
     if _table_exists(cursor, "userservice", "module"):
-        resources["modules"] = _fetch_all(
+        raw_modules = _fetch_all(
             cursor,
             """
             SELECT
@@ -653,6 +738,10 @@ def _load_catalog_resources(cursor) -> dict[str, list[dict[str, Any]]]:
             """,
             {},
         )
+        resources["modules"] = [
+            _repair_row_encoding(row, ["module_name", "introduction", "type"])
+            for row in raw_modules
+        ]
     return resources
 
 
@@ -1013,6 +1102,27 @@ def _serialize_snapshot(row: dict[str, Any]) -> dict[str, Any]:
     result = dict(row)
     if isinstance(result.get("profile_summary_json"), str):
         result["profile_summary_json"] = json.loads(result["profile_summary_json"])
+
+    # 对 profile_summary_json 中的推荐数据进行编码修复
+    summary = result.get("profile_summary_json")
+    if isinstance(summary, dict):
+        recommendations = summary.get("recommendations")
+        if isinstance(recommendations, list):
+            for rec in recommendations:
+                if isinstance(rec, dict):
+                    for key in ("title", "reason", "dimension_name", "actionText", "action"):
+                        val = rec.get(key)
+                        if isinstance(val, str):
+                            rec[key] = _repair_double_encoded_utf8(val)
+                    # 修复 knowledgeTags 和 tags
+                    for list_key in ("knowledgeTags", "tags"):
+                        tag_list = rec.get(list_key)
+                        if isinstance(tag_list, list):
+                            rec[list_key] = [
+                                _repair_double_encoded_utf8(t) if isinstance(t, str) else t
+                                for t in tag_list
+                            ]
+
     for key in (
         "computed_at",
         "source_range_start",
