@@ -244,87 +244,6 @@ function parseStorageValue(raw: string) {
   return raw
 }
 
-// 兜底修复后端未及时处理或数据库中残留的 mojibake 乱码
-// 对应 Python 端 _repair_double_encoded_utf8 的逻辑
-// 安全策略：只在确认是乱码时修复，绝不把正确中文"修复"成乱码
-function repairMojibakeText(input: string): string {
-  if (!input || typeof input !== 'string') return input
-  if (input.length > 0 && /^[\x00-\x7F]+$/.test(input)) return input
-  // 纯中文（CJK + 标点 + 空格 + 数字 + %），非乱码，直接跳过
-  if (/^[\u4E00-\u9FFF\s\u3000-\u303F\uFF00-\uFFEF，。、；：？！（）—《》【】「」·%.\d]+$/.test(input)) {
-    return input
-  }
-
-  // 特征统计
-  let latin1HighCount = 0
-  let asciiAlphaCount = 0
-  for (const ch of input) {
-    const code = ch.charCodeAt(0)
-    if (code >= 0x80 && code <= 0xFF) latin1HighCount++
-    if (code <= 0x7F && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122))) asciiAlphaCount++
-  }
-  const hasCJK = /[\u4E00-\u9FFF]/.test(input)
-
-  // 策略 1：Latin-1 高位字节修复（安全：正确中文均在 U+4E00+，不受影响）
-  if (latin1HighCount > 0) {
-    for (const enc of ['latin1', 'cp1252']) {
-      try {
-        const bytes = new Uint8Array(input.length)
-        let valid = true
-        for (let i = 0; i < input.length; i++) {
-          const code = input.charCodeAt(i)
-          if (code > 0xFF) { valid = false; break }
-          bytes[i] = code
-        }
-        if (!valid) continue
-        const decoder = new TextDecoder('utf-8')
-        const repaired = decoder.decode(bytes)
-        if (repaired !== input && /[\u4E00-\u9FFF]/.test(repaired)) {
-          return repaired
-        }
-      } catch { /* ignore */ }
-    }
-  }
-
-  // 策略 2：GBK 乱码修复（仅当同时有 ASCII 字母和 CJK 时才触发）
-  // 如 "涓嶤SRF鍩虹" 中 "SRF" 嵌在 CJK 中间，是典型乱码
-  // 纯中文（如 "知识掌握度偏低"）不会触发此策略
-  const hasGarbledMix = hasCJK && asciiAlphaCount >= 2 && latin1HighCount === 0
-  if (hasGarbledMix) {
-    for (const enc of ['gbk', 'gb18030']) {
-      try {
-        const encoder = new TextEncoder()
-        const bytes = encoder.encode(input)
-        const decoder = new TextDecoder(enc)
-        const repaired = decoder.decode(bytes)
-        if (repaired !== input && /[\u4E00-\u9FFF]/.test(repaired) && repaired.length < input.length * 1.5) {
-          return repaired
-        }
-      } catch { /* ignore */ }
-    }
-  }
-
-  return input
-}
-
-// 深度修复对象/数组内的字符串字段
-function repairMojibakeDeep<T>(value: T): T {
-  if (typeof value === 'string') {
-    return repairMojibakeText(value) as unknown as T
-  }
-  if (Array.isArray(value)) {
-    return value.map((v) => repairMojibakeDeep(v)) as unknown as T
-  }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = repairMojibakeDeep(v)
-    }
-    return out as unknown as T
-  }
-  return value
-}
-
 function candidateRecords(value: unknown): Record<string, unknown>[] {
   const queue = [value]
   const records: Record<string, unknown>[] = []
@@ -1304,12 +1223,10 @@ async function fetchLatestProfileData(userId: number) {
   if (!userId) return null
   try {
     const latest = await getProfileLatest(userId)
-    // 兜底：前端再次对画像数据做 mojibake 修复，避免后端编码修复遗漏
-    const repaired = repairMojibakeDeep(latest)
-    if (hasMeaningfulLatestProfile(repaired)) {
+    if (hasMeaningfulLatestProfile(latest)) {
       pageNotice.value = ''
-      latestProfile.value = repaired
-      return repaired
+      latestProfile.value = latest
+      return latest
     }
     latestProfile.value = null
     return null
