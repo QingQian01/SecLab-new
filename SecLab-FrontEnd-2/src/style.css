@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#app {
+  min-height: 100%;
+  background-color: hsl(var(--b1));
+}
+
+body {
+  color: hsl(var(--bc));
+}
