@@ -4,6 +4,10 @@ import type { ModuleOverViewType } from './ModuleOverView';
 const props = defineProps<{
   module: ModuleOverViewType;
 }>();
+
+const emit = defineEmits<{
+  start: [module: ModuleOverViewType]
+}>()
 </script>
 
 <template>
@@ -74,6 +78,8 @@ const props = defineProps<{
         <button 
           class="btn btn-primary btn-sm"
           :disabled="module.status === 'locked'"
+          type="button"
+          @click="emit('start', module)"
         >
           {{ module.status === 'locked' ? '未解锁' : '开始实验' }}
         </button>

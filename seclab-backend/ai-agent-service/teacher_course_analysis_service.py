@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from database import get_connection
 from teacher_ai_analysis_service import _call_dify_for_student_analysis, provider_failure_message
 from teacher_analysis_repository import AnalysisAlreadyRunningError
+from teacher_learning_insight_repository import build_normalized_knowledge_attempts_sql
 from teacher_repository import (
-    list_generated_questions_for_teacher,
     require_owned_teaching_class,
     require_student_in_owned_teaching_class,
 )
-from training_repository import list_generated_question_attempts
 
 
 USER_SERVICE_SCHEMA = "userservice"
@@ -33,6 +31,13 @@ def _json_loads(value: Any) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return None
+
+
+def _json_value(value: Any, default: Any = None) -> Any:
+    parsed = _json_loads(value)
+    if parsed is not None:
+        return parsed
+    return value if value is not None else default
 
 
 def _latest(attempts: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
@@ -120,64 +125,6 @@ def build_course_question_summary(records: list[dict[str, Any]]) -> dict[str, An
         "averageScore": round(sum(scores) / len(scores), 1) if scores else 0.0,
         "students": students,
         "knowledgePoints": knowledge_points,
-    }
-
-
-def build_course_analysis_fallback(
-    records: list[dict[str, Any]],
-    *,
-    scope: str,
-    course: dict[str, Any],
-    provider_message: Optional[str] = None,
-) -> dict[str, Any]:
-    summary = build_course_question_summary(records)
-    course_name = str(course.get("courseName") or "当前课程")
-    weak = [item for item in summary["knowledgePoints"] if item["incorrectQuestionCount"] > 0][:3]
-    representative = []
-    for item in records:
-        latest = _latest(item.get("attemptHistory") or [])
-        if latest and latest.get("isCorrect") is False:
-            representative.append(
-                {
-                    "generatedQuestionId": item.get("generatedQuestionId"),
-                    "title": item.get("title") or "未命名题目",
-                    "studentName": (item.get("student") or {}).get("studentName"),
-                    "knowledgePointName": item.get("knowledgePointName") or "未标注知识点",
-                    "latestAnswer": latest.get("answer"),
-                    "standardAnswer": item.get("standardAnswer") or item.get("referenceAnswer"),
-                    "score": latest.get("score"),
-                }
-            )
-        if len(representative) >= 5:
-            break
-    focus_text = "、".join(item["knowledgePointName"] for item in weak) or "暂无集中错误知识点"
-    return {
-        "scope": "student_course" if scope.upper() == "STUDENT" or scope.lower() == "student" else "class_course",
-        "courseId": int(course.get("courseId") or 0),
-        "courseName": course_name,
-        "generatedBy": "course_evidence_fallback",
-        "fallbackUsed": True,
-        "providerMessage": provider_message,
-        "generatedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "overallComment": (
-            f"{course_name}共记录 {summary['questionCount']} 道题、{summary['attemptCount']} 次作答，"
-            f"按每道题最后一次作答统计正确率为 {summary['accuracyRate'] * 100:.1f}%。重点关注：{focus_text}。"
-        ),
-        "summary": summary,
-        "knowledgeFindings": [
-            {
-                **item,
-                "evidence": f"该知识点有 {item['incorrectQuestionCount']} 道题最后一次仍答错，涉及 {item['affectedStudentCount']} 名学生。",
-                "teacherAction": "打开下方错题查看学生答案与标准答案，讲评后下发同知识点变式题。",
-            }
-            for item in weak
-        ],
-        "representativeMistakes": representative,
-        "teachingSuggestions": [
-            "优先讲解最后一次仍答错的题目，并要求学生说明错误原因。",
-            "对同一题重试后答对的学生，抽查其修正过程而不只看最终答案。",
-            "五维画像仅作为跨课程统计参考，课程结论以本课程真实作答证据为准。",
-        ],
     }
 
 
@@ -270,13 +217,36 @@ class TeacherCourseAnalysisRepository:
         key = self._key(teacher_id, class_id, course_id, scope, student_id)
         if self.memory_store is not None:
             row = self.memory_store.setdefault(key, self._empty(key))
-            row["analysis_status"] = "READY" if row.get("analysis_json") else "FAILED"
-            row["last_error_message"] = message
+            row.update(
+                analysis_status="FAILED",
+                analysis_json=None,
+                source_stats_json=None,
+                last_error_message=message,
+            )
             return
         self.ensure_schema()
         with self.connection_factory() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("UPDATE teacher_course_analysis SET analysis_status=IF(analysis_json IS NULL,'FAILED','READY'), last_error_message=%(message)s WHERE teacher_id=%(teacher_id)s AND teaching_class_id=%(class_id)s AND course_id=%(course_id)s AND analysis_scope=%(scope)s AND student_id=%(student_id)s", {"teacher_id": teacher_id, "class_id": class_id, "course_id": course_id, "scope": scope.upper(), "student_id": student_id, "message": str(message)[:500]})
+                cursor.execute(
+                    """
+                    UPDATE teacher_course_analysis
+                    SET analysis_status='FAILED', analysis_json=NULL,
+                        source_stats_json=NULL, last_error_message=%(message)s
+                    WHERE teacher_id=%(teacher_id)s
+                      AND teaching_class_id=%(class_id)s
+                      AND course_id=%(course_id)s
+                      AND analysis_scope=%(scope)s
+                      AND student_id=%(student_id)s
+                    """,
+                    {
+                        "teacher_id": teacher_id,
+                        "class_id": class_id,
+                        "course_id": course_id,
+                        "scope": scope.upper(),
+                        "student_id": student_id,
+                        "message": str(message)[:500],
+                    },
+                )
             conn.commit()
 
     def get_latest(self, teacher_id: int, class_id: int, course_id: int, scope: str, student_id: int) -> dict[str, Any]:
@@ -289,7 +259,27 @@ class TeacherCourseAnalysisRepository:
                 with conn.cursor() as cursor:
                     cursor.execute("SELECT * FROM teacher_course_analysis WHERE teacher_id=%(teacher_id)s AND teaching_class_id=%(class_id)s AND course_id=%(course_id)s AND analysis_scope=%(scope)s AND student_id=%(student_id)s", {"teacher_id": teacher_id, "class_id": class_id, "course_id": course_id, "scope": scope.upper(), "student_id": student_id})
                     row = cursor.fetchone() or self._empty(key)
-        return {"teacherId": teacher_id, "teachingClassId": class_id, "courseId": course_id, "scope": scope.upper(), "studentId": student_id or None, "analysisStatus": row.get("analysis_status") or "IDLE", "analysis": _json_loads(row.get("analysis_json")), "sourceStats": _json_loads(row.get("source_stats_json")), "lastErrorMessage": row.get("last_error_message"), "generatedAt": _iso(row.get("generated_at"))}
+        analysis = _json_loads(row.get("analysis_json"))
+        if isinstance(analysis, dict) and (
+            analysis.get("fallbackUsed") is True
+            or analysis.get("generatedBy") == "course_evidence_fallback"
+        ):
+            analysis = None
+            status = "IDLE"
+        else:
+            status = row.get("analysis_status") or "IDLE"
+        return {
+            "teacherId": teacher_id,
+            "teachingClassId": class_id,
+            "courseId": course_id,
+            "scope": scope.upper(),
+            "studentId": student_id or None,
+            "analysisStatus": status,
+            "analysis": analysis,
+            "sourceStats": _json_loads(row.get("source_stats_json")) if analysis else None,
+            "lastErrorMessage": row.get("last_error_message"),
+            "generatedAt": _iso(row.get("generated_at")) if analysis else None,
+        }
 
 
 COURSE_ANALYSIS_REPOSITORY = TeacherCourseAnalysisRepository()
@@ -311,19 +301,88 @@ def collect_course_question_records(class_id: int, course_id: int, current_user:
     course = require_course_in_owned_class(teacher_id, class_id, course_id)
     if student_id is not None:
         require_student_in_owned_teaching_class(teacher_id, class_id, student_id)
-    first = list_generated_questions_for_teacher(current_user=current_user, teaching_class_id=class_id, course_id=course_id, student_id=student_id, page=1, size=100)
-    records = list(first.get("items") or [])
-    page = 2
-    while len(records) < int(first.get("total") or 0):
-        batch = list_generated_questions_for_teacher(current_user=current_user, teaching_class_id=class_id, course_id=course_id, student_id=student_id, page=page, size=100)
-        records.extend(batch.get("items") or [])
-        page += 1
-    attempts_by_question: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for session_id in {item.get("trainingSessionId") for item in records if item.get("trainingSessionId")}:
-        for attempt in list_generated_question_attempts(str(session_id), user_id=student_id):
-            attempts_by_question[str(attempt.get("generated_question_id"))].append({"attemptId": attempt.get("attempt_id"), "answer": attempt.get("answer"), "isCorrect": attempt.get("is_correct"), "score": attempt.get("score"), "costTime": attempt.get("cost_time"), "submittedAt": attempt.get("submitted_at")})
-    for item in records:
-        item["attemptHistory"] = attempts_by_question.get(str(item.get("generatedQuestionId")), [])
+    student_filter = "AND attempts.student_id = %(student_id)s" if student_id is not None else ""
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                WITH normalized_attempts AS (
+                    {build_normalized_knowledge_attempts_sql()}
+                )
+                SELECT
+                    attempts.*,
+                    COALESCE(kp.name, '未标注知识点') AS knowledge_point_name,
+                    COALESCE(u.user_name, u.user_student_number, '未命名学生') AS student_name,
+                    u.user_student_number AS student_number,
+                    tc.class_name AS teaching_class_name
+                FROM normalized_attempts attempts
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs
+                  ON tcs.student_id = attempts.student_id
+                 AND tcs.teaching_class_id = %(class_id)s
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class` tc
+                  ON tc.teaching_class_id = tcs.teaching_class_id
+                LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u
+                  ON u.user_id = attempts.student_id
+                LEFT JOIN knowledge_point kp
+                  ON kp.knowledge_point_id = attempts.knowledge_point_id
+                WHERE attempts.course_id = %(course_id)s
+                  {student_filter}
+                ORDER BY attempts.submitted_at, attempts.attempt_key
+                """,
+                {"class_id": class_id, "course_id": course_id, "student_id": student_id},
+            )
+            rows = list(cursor.fetchall() or [])
+
+    grouped: dict[tuple[int, str], dict[str, Any]] = {}
+    for row in rows:
+        row_student_id = int(row.get("student_id") or 0)
+        question_key = str(row.get("generated_question_id") or row.get("attempt_key") or "")
+        key = (row_student_id, question_key)
+        record = grouped.setdefault(
+            key,
+            {
+                "generatedQuestionId": f"{row_student_id}:{question_key}",
+                "trainingSessionId": None,
+                "student": {
+                    "studentId": row_student_id,
+                    "studentNumber": row.get("student_number"),
+                    "studentName": row.get("student_name") or "未命名学生",
+                },
+                "teachingClassId": class_id,
+                "teachingClassName": row.get("teaching_class_name") or f"教学班 {class_id}",
+                "courseId": course_id,
+                "courseName": course["courseName"],
+                "knowledgePointId": int(row.get("knowledge_point_id") or 0) or None,
+                "knowledgePointName": row.get("knowledge_point_name") or "未标注知识点",
+                "questionType": row.get("question_type"),
+                "difficulty": None,
+                "title": row.get("title") or question_key,
+                "stem": row.get("stem") or row.get("title") or question_key,
+                "options": _json_value(row.get("options_json"), []),
+                "generationReason": None,
+                "standardAnswer": _json_value(row.get("standard_answer")),
+                "referenceAnswer": None,
+                "explanation": None,
+                "attemptCount": 0,
+                "generatedAt": _iso(row.get("submitted_at")),
+                "isTypical": False,
+                "attemptHistory": [],
+            },
+        )
+        attempt = {
+            "attemptId": str(row.get("attempt_key") or ""),
+            "answer": _json_value(row.get("answer_json")),
+            "isCorrect": None if row.get("is_correct") is None else bool(row.get("is_correct")),
+            "score": float(row.get("score") or 0),
+            "costTime": row.get("cost_time"),
+            "submittedAt": _iso(row.get("submitted_at")),
+        }
+        record["attemptHistory"].append(attempt)
+
+    records = list(grouped.values())
+    for record in records:
+        record["attemptCount"] = len(record["attemptHistory"])
+        record["latestAttempt"] = record["attemptHistory"][-1] if record["attemptHistory"] else None
     return {"success": True, "teachingClassId": class_id, "course": course, "studentId": student_id, "items": records, "summary": build_course_question_summary(records)}
 
 
@@ -353,6 +412,15 @@ async def run_course_analysis(class_id: int, course_id: int, current_user: dict[
     except Exception as exc:
         provider_message = provider_failure_message(exc)
     if result is None:
-        result = build_course_analysis_fallback(evidence["items"], scope=scope, course=evidence["course"], provider_message=provider_message)
+        message = provider_message or "AI 分析未返回有效结果"
+        COURSE_ANALYSIS_REPOSITORY.save_failure(
+            teacher_id,
+            class_id,
+            course_id,
+            scope,
+            student_id or 0,
+            message,
+        )
+        raise RuntimeError(message)
     COURSE_ANALYSIS_REPOSITORY.save_success(teacher_id, class_id, course_id, scope, student_id or 0, cutoff, result, evidence["summary"])
     return COURSE_ANALYSIS_REPOSITORY.get_latest(teacher_id, class_id, course_id, scope, student_id or 0)

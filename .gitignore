@@ -55,6 +55,7 @@ env/
 # Logs and crash dumps
 *.log
 logs/
+.runtime-logs/
 hs_err_pid*.log
 replay_pid*.log
 

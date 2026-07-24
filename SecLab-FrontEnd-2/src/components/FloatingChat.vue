@@ -87,11 +87,11 @@
               <div class="chat-bubble assistant-bubble p-0 text-xs">
                 <!-- ── 工具调用可视化卡片 ─────────────────────── -->
                 <div
-                  v-if="message.toolCalls && message.toolCalls.length > 0"
+                  v-if="visibleAgentToolCalls(message.toolCalls).length > 0"
                   class="px-2 pt-2 space-y-1"
                 >
                   <div
-                    v-for="tc in message.toolCalls"
+                    v-for="tc in visibleAgentToolCalls(message.toolCalls)"
                     :key="tc.id"
                     class="rounded-lg border border-secondary/25 bg-base-200/60 p-2 text-xs"
                   >
@@ -101,12 +101,17 @@
                         v-if="tc.status === 'calling'"
                         class="loading loading-spinner loading-xs text-secondary"
                       ></span>
+                      <i
+                        v-else-if="tc.status === 'error'"
+                        class="fas fa-exclamation-circle text-error"
+                        style="font-size:10px"
+                      ></i>
                       <i v-else class="fas fa-check-circle text-success" style="font-size:10px"></i>
                       <span class="text-secondary">
                         {{ TOOL_LABELS[tc.tool] || ('🔧 ' + tc.tool) }}
                       </span>
                       <span class="ml-auto text-base-content/40 font-normal">
-                        {{ tc.status === 'calling' ? '调用中…' : '✔ 完成' }}
+                        {{ tc.status === 'calling' ? '调用中…' : tc.status === 'error' ? '读取失败' : '✔ 完成' }}
                       </span>
                     </div>
                     <!-- 参数摘要 -->
@@ -121,29 +126,7 @@
                       v-if="tc.observation"
                       class="mt-1 text-base-content/55 leading-snug"
                     >
-                      {{ tc.observation.length > 140 ? tc.observation.slice(0, 140) + '…' : tc.observation }}
-                    </div>
-                  </div>
-                </div>
-
-                <!-- ── 思考过程 - 可折叠面板 ─────────────────── -->
-                <div v-if="message.thinking && message.showThinking" class="collapse collapse-arrow bg-base-200/30 mb-2 rounded-lg">
-                  <input type="checkbox" class="min-h-0" checked />
-                  <div class="collapse-title py-1 px-2 min-h-0 flex items-center gap-2 text-base-content/70 text-xs font-medium">
-                    <i class="fas fa-brain text-secondary text-xs"></i>
-                    <span class="text-xs">思考过程</span>
-                  </div>
-                  <div class="collapse-content px-2 pt-0">
-                    <div class="text-xs text-base-content/70 thinking-content p-2">
-                      <div v-if="message.isStreaming">
-                        <MarkdownRenderer :content="message.thinking || ''" />
-                        <span v-if="message.thinking" class="inline-block ml-1">
-                          <span class="loading loading-dots loading-xs"></span>
-                        </span>
-                      </div>
-                      <div v-else>
-                        <MarkdownRenderer :content="message.thinking || ''" />
-                      </div>
+                      {{ tc.observation }}
                     </div>
                   </div>
                 </div>
@@ -234,6 +217,14 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch, computed } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
+import {
+  buildLabHintRequest,
+  resolveLabChatInputs,
+  sanitizeAssistantAnswer,
+  shouldShowAgentToolCalls,
+  summarizeToolObservation,
+  visibleAgentToolCalls,
+} from './floatingChatHint'
 import { currentLabContext } from '../composables/useLabState'
 import { reportLearningEvent } from '../api'
 
@@ -244,7 +235,6 @@ interface DifyChunk {
   answer?: string
   message_id?: string
   id?: string
-  thought?: string
   observation?: string
   tool?: string
   tool_input?: string  // 工具调用入参（JSON 字符串）
@@ -257,17 +247,15 @@ interface ToolCall {
   tool: string
   toolInput?: string   // 格式化后的入参摘要
   observation?: string // 工具返回结果
-  status: 'calling' | 'done'
+  status: 'calling' | 'done' | 'error'
 }
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
-  thinking?: string
   streamContent?: string
   isStreaming?: boolean
-  showThinking?: boolean
   toolCalls?: ToolCall[]  // 该消息产生的工具调用列表
 }
 
@@ -379,11 +367,27 @@ async function persistAiInteractionEvent(userQuestion: string, assistantReply: s
 }
 
 // ── 一键提示 ─────────────────────────────────────────────────────
+const getLabContextForChat = () => {
+  const context = currentLabContext.value
+  return {
+    moduleId: context.moduleId,
+    moduleName: context.moduleName,
+    experimentId: context.experimentId,
+    experimentTitle: context.experimentTitle,
+    currentTask: context.currentTask,
+    labSessionId: context.labSessionId,
+    containerName: context.containerName || context.currentLabContainer || props.labContainer,
+    targetUrl: context.targetMachineUrl || context.targetUrl,
+    userId: context.userId,
+    classId: context.classId,
+    courseId: context.courseId,
+  }
+}
+
 const sendHint = () => {
-  const container = props.labContainer || 'sqli-lab-web-1'
-  const contextText = labContextText.value ? `\n\n当前实验上下文：\n${labContextText.value}` : ''
-  inputMessage.value =
-    `请帮我读取 ${container} 容器的最新50行日志，结合当前实验上下文分析我的操作进展，并给出针对性的提示。${contextText}`
+  const request = buildLabHintRequest(getLabContextForChat())
+  inputMessage.value = request.visibleMessage
+  pendingChatInputs.value = request.inputs
   handleSendMessage()
   emit('hint-sent')
 }
@@ -396,9 +400,7 @@ watch(() => props.autoHint, (val) => {
 // 监听来自 iframe postMessage 的提示文本
 watch(() => props.iframeHintPrompt, (prompt) => {
   if (prompt) {
-    inputMessage.value = prompt
-    handleSendMessage()
-    emit('hint-sent')
+    sendHint()
   }
 })
 
@@ -416,6 +418,7 @@ const inputMessage = ref('')
 const isLoading = ref(false)
 const chatContainer = ref<HTMLElement | null>(null)
 const inputField = ref<HTMLTextAreaElement | null>(null)
+const pendingChatInputs = ref<Record<string, unknown>>({})
 // Agent 服务地址（指向本地 FastAPI）
 const AGENT_BASE_URL = import.meta.env.VITE_AGENT_BASE_URL || 'http://localhost:8010'
 
@@ -474,14 +477,16 @@ const scrollToBottom = () => {
 }
 
 // ── 调用 Dify Agent（SSE 流式）──────────────────────────────
-const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
+const callDifyAgent = async (
+  userQuestion: string,
+  messageIndex: number,
+  requestInputs: Record<string, unknown>,
+) => {
   messages.value[messageIndex].isStreaming = true
   messages.value[messageIndex].streamContent = ''
-  messages.value[messageIndex].showThinking = true
-  messages.value[messageIndex].thinking = ''
 
   let completeResponse = ''
-  let completeThinking = ''
+  let rawResponse = ''
 
   try {
     const response = await fetch(`${AGENT_BASE_URL}/api/chat`, {
@@ -491,7 +496,7 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
         query: userQuestion,
         conversation_id: conversationId.value,
         user: 'student',
-        inputs: {}
+        inputs: requestInputs
       })
     })
 
@@ -527,32 +532,28 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
 
           // Agent 思考步骤（tool 调用过程）
           if (chunk.event === 'agent_thought') {
-            // 纯思考文字（无工具调用时）
-            if (chunk.thought && !chunk.tool) {
-              completeThinking += chunk.thought + '\n'
-              messages.value[messageIndex].thinking = completeThinking
-            }
-
             // 工具调用 → 可视化卡片
-            if (chunk.tool) {
+            if (chunk.tool && shouldShowAgentToolCalls(requestInputs)) {
               const tcId = chunk.id || `tc-${Date.now()}-${Math.random()}`
               const toolCalls = messages.value[messageIndex].toolCalls || []
               const existing = toolCalls.find((tc: ToolCall) => tc.id === tcId)
 
               if (!existing) {
                 // 第一次收到此工具调用（calling 状态）
+                const observation = summarizeToolObservation(chunk.observation || '')
                 toolCalls.push({
                   id: tcId,
                   tool: chunk.tool,
                   toolInput: chunk.tool_input ? formatToolInput(chunk.tool_input) : '',
-                  observation: chunk.observation || '',
-                  status: chunk.observation ? 'done' : 'calling'
+                  observation: chunk.observation ? observation.text : '',
+                  status: chunk.observation ? (observation.failed ? 'error' : 'done') : 'calling'
                 } as ToolCall)
               } else {
                 // 第二次收到（含 observation，done 状态）
                 if (chunk.observation) {
-                  existing.observation = chunk.observation
-                  existing.status = 'done'
+                  const observation = summarizeToolObservation(chunk.observation)
+                  existing.observation = observation.text
+                  existing.status = observation.failed ? 'error' : 'done'
                 }
               }
               messages.value[messageIndex].toolCalls = toolCalls
@@ -564,7 +565,8 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
           if (chunk.event === 'agent_message' || chunk.event === 'message') {
             const delta = chunk.answer ?? ''
             if (delta) {
-              completeResponse += delta
+              rawResponse += delta
+              completeResponse = sanitizeAssistantAnswer(rawResponse)
               messages.value[messageIndex].streamContent = completeResponse
               nextTick(() => scrollToBottom())
             }
@@ -627,6 +629,11 @@ const handleSendMessage = () => {
 
   messages.value.push(newMessage)
   const userQuestion = inputMessage.value
+  const requestInputs = resolveLabChatInputs(
+    pendingChatInputs.value,
+    getLabContextForChat(),
+  )
+  pendingChatInputs.value = {}
   inputMessage.value = ''
   
   // 自动滚动到底部
@@ -646,7 +653,7 @@ const handleSendMessage = () => {
   scrollToBottom()
   
   // 调用 Dify Agent
-  callDifyAgent(userQuestion, responseIndex)
+  callDifyAgent(userQuestion, responseIndex, requestInputs)
     .finally(() => {
       isLoading.value = false
       // 回答完成后再次滚动到底部

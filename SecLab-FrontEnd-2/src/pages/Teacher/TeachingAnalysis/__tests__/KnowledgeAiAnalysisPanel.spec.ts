@@ -29,6 +29,32 @@ const analysis = {
 }
 
 describe('KnowledgeAiAnalysisPanel', () => {
+  it('shows the persisted provider error instead of a blank failed state', async () => {
+    const html = await renderToString(createSSRApp(KnowledgeAiAnalysisPanel, {
+      classId: 101,
+      courseId: 7,
+      knowledgePointId: 71,
+      knowledgePointName: '联合查询列数判断',
+      affectedStudents: [],
+      allStudents: [],
+      initialAnalysis: {
+        teacherId: 7,
+        teachingClassId: 101,
+        courseId: 7,
+        knowledgePointId: 71,
+        analysisStatus: 'FAILED',
+        analysis: null,
+        evidence: null,
+        lastErrorMessage: 'AI 分析请求超时，请稍后重试',
+        generatedAt: null,
+        exercises: [],
+      },
+    }))
+
+    expect(html).toContain('AI 分析请求超时，请稍后重试')
+    expect(html).toContain('开始 AI 分析')
+  })
+
   it('renders grounded advice and three independently reviewed exercises', async () => {
     const html = await renderToString(createSSRApp(KnowledgeAiAnalysisPanel, {
       classId: 101,

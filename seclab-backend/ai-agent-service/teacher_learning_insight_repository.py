@@ -128,6 +128,112 @@ def _timeline_item(
     }
 
 
+def _short_text(value: Any, limit: int = 120) -> str:
+    text = normalize_display_text(value, "")
+    if len(text) <= limit:
+        return text
+    return text[: max(1, limit - 1)].rstrip() + "…"
+
+
+def _event_experiment_name(row: dict[str, Any], payload: dict[str, Any]) -> str:
+    context = _json_object(payload.get("context"))
+    return (
+        normalize_display_text(context.get("experimentTitle"), "")
+        or normalize_display_text(context.get("moduleName"), "")
+        or normalize_display_text(row.get("module_name"), "")
+        or normalize_display_text(row.get("course_name"), "")
+    )
+
+
+def _experiment_title(name: str) -> str:
+    value = _short_text(name, 80)
+    if not value:
+        return "实验"
+    return value if value.endswith("实验") else f"{value}实验"
+
+
+def _submitted_answer_text(payload: dict[str, Any], snapshot: dict[str, Any]) -> str:
+    answer = payload.get("answer")
+    options = snapshot.get("options")
+    if isinstance(options, list):
+        indices = answer if isinstance(answer, list) else [answer]
+        selected = []
+        for value in indices:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= index < len(options):
+                selected.append(normalize_display_text(options[index], ""))
+        if selected:
+            return "、".join(item for item in selected if item)
+    if isinstance(answer, (dict, list)):
+        return json.dumps(answer, ensure_ascii=False, default=str)
+    return normalize_display_text(answer, "未记录作答内容")
+
+
+def _is_formula_copy(value: Any) -> bool:
+    text = normalize_display_text(value, "")
+    return any(
+        marker in text
+        for marker in (
+            "占综合分",
+            "内部采用",
+            "作为可落地代理指标",
+            "不是对立维度",
+        )
+    )
+
+
+def _dimension_fact_summary(key: str, evidence: list[dict[str, Any]]) -> str:
+    counts = {
+        kind: sum(1 for item in evidence if item.get("kind") == kind)
+        for kind in ("ATTEMPT", "SUCCESS", "ERROR", "COMMAND", "HINT", "LAB_START", "AI")
+    }
+    if key == "knowledge_mastery":
+        attempts = counts["ATTEMPT"]
+        correct = sum(
+            1
+            for item in evidence
+            if item.get("kind") == "ATTEMPT"
+            and (item.get("isCorrect") is True or item.get("status") == "success")
+        )
+        if attempts:
+            return f"记录 {attempts} 次作答，其中 {correct} 次正确。"
+        if counts["SUCCESS"]:
+            return f"记录 {counts['SUCCESS']} 次实验验证成功。"
+        return "暂无题目作答或实验验证记录。"
+    if key == "troubleshooting":
+        parts = []
+        if counts["ERROR"]:
+            parts.append(f"{counts['ERROR']} 次报错")
+        if counts["COMMAND"]:
+            parts.append(f"{counts['COMMAND']} 次操作")
+        if counts["HINT"]:
+            parts.append(f"{counts['HINT']} 次求助")
+        return f"记录 {'、'.join(parts)}。" if parts else "暂无排障过程记录。"
+    if key == "autonomy":
+        if counts["COMMAND"]:
+            return f"记录 {counts['LAB_START']} 次实验启动、{counts['COMMAND']} 次实验操作。"
+        if counts["LAB_START"]:
+            return f"记录 {counts['LAB_START']} 次实验启动，尚未采集到实验内操作。"
+        return "暂无自主实验操作记录。"
+    if key == "ai_collaboration":
+        if counts["AI"]:
+            return f"记录 {counts['AI']} 次 AI 对话，可查看具体提问与回复。"
+        return "暂无可展示的 AI 对话记录。"
+    if key == "engagement":
+        parts = []
+        if counts["LAB_START"]:
+            parts.append(f"{counts['LAB_START']} 次实验启动")
+        if counts["ATTEMPT"]:
+            parts.append(f"{counts['ATTEMPT']} 次作答")
+        if counts["SUCCESS"]:
+            parts.append(f"{counts['SUCCESS']} 次验证成功")
+        return f"记录 {'、'.join(parts)}。" if parts else "暂无实验参与记录。"
+    return "暂无学习记录。"
+
+
 def compose_learning_timeline(
     *,
     learning_rows: Iterable[dict[str, Any]],
@@ -149,10 +255,109 @@ def compose_learning_timeline(
     }
     for row in learning_rows:
         event_type = str(row.get("event_type") or "")
+        payload = _json_object(row.get("payload_json"))
+        experiment_name = _event_experiment_name(row, payload)
+
+        if event_type == "AI_INTERACTION":
+            prompt = _short_text(payload.get("prompt"), 100)
+            if not prompt:
+                continue
+            reply = _short_text(payload.get("assistant_reply"), 280)
+            context_name = _event_experiment_name(row, payload)
+            detail_parts = []
+            if context_name:
+                detail_parts.append(f"实验：{context_name}")
+            if reply:
+                detail_parts.append(f"AI 回复：{reply}")
+            items.append(
+                _timeline_item(
+                    kind="AI",
+                    occurred_at=row.get("event_time"),
+                    source_id=row.get("event_id"),
+                    title=f"咨询 AI：{prompt}",
+                    detail=" · ".join(detail_parts),
+                    status="info",
+                    lab_session_id=row.get("lab_session_id"),
+                    module_id=row.get("module_id"),
+                    task_id=row.get("task_id"),
+                )
+            )
+            continue
+
+        if event_type in {"LAB_START", "START_LAB"}:
+            runtime_name = _experiment_title(experiment_name)
+            container_name = normalize_display_text(payload.get("container_name"), "")
+            target_url = normalize_display_text(payload.get("target_url"), "")
+            detail_parts = []
+            if container_name:
+                detail_parts.append(f"靶机：{container_name}")
+            if target_url:
+                detail_parts.append(f"地址：{target_url}")
+            items.append(
+                _timeline_item(
+                    kind="LAB_START",
+                    occurred_at=row.get("event_time"),
+                    source_id=row.get("event_id"),
+                    title=f"启动 {runtime_name}",
+                    detail=" · ".join(detail_parts),
+                    status="info",
+                    lab_session_id=row.get("lab_session_id"),
+                    module_id=row.get("module_id"),
+                    task_id=row.get("task_id"),
+                )
+            )
+            continue
+
+        if event_type == "LAB_STOP":
+            runtime_name = _experiment_title(experiment_name)
+            container_name = normalize_display_text(payload.get("container_name"), "")
+            target_url = normalize_display_text(payload.get("target_url"), "")
+            detail_parts = []
+            if container_name:
+                detail_parts.append(f"靶机：{container_name}")
+            if target_url:
+                detail_parts.append(f"地址：{target_url}")
+            items.append(
+                _timeline_item(
+                    kind="LAB_STOP",
+                    occurred_at=row.get("event_time"),
+                    source_id=row.get("event_id"),
+                    title=f"结束 {runtime_name}",
+                    detail=" · ".join(detail_parts),
+                    status="info",
+                    lab_session_id=row.get("lab_session_id"),
+                    module_id=row.get("module_id"),
+                    task_id=row.get("task_id"),
+                )
+            )
+            continue
+
+        if event_type == "QUESTION_SUBMIT":
+            snapshot = _json_object(row.get("question_snapshot_json"))
+            question = _short_text(snapshot.get("content"), 120) or f"实验题 {row.get('question_id') or ''}".strip()
+            answer = _short_text(_submitted_answer_text(payload, snapshot), 160)
+            correct = payload.get("is_correct") in (1, True)
+            score = float(payload.get("score") or 0)
+            items.append(
+                _timeline_item(
+                    kind="ATTEMPT",
+                    occurred_at=row.get("event_time"),
+                    source_id=row.get("event_id"),
+                    title=f"作答：{question}",
+                    detail=f"作答：{answer} · {'回答正确' if correct else '回答错误'} · {score:g} 分",
+                    status="success" if correct else "failed",
+                    lab_session_id=row.get("lab_session_id"),
+                    module_id=row.get("module_id"),
+                    task_id=row.get("task_id"),
+                    score=score,
+                    isCorrect=correct,
+                )
+            )
+            continue
+
         if event_type not in learning_kind:
             continue
         kind, title, status = learning_kind[event_type]
-        payload = _json_object(row.get("payload_json"))
         items.append(
             _timeline_item(
                 kind=kind,
@@ -264,13 +469,14 @@ def build_capability_dimensions(
     summary = _json_object(profile.get("profile_summary_json"))
     explanations = summary.get("dimension_explanations")
     explanations = explanations if isinstance(explanations, dict) else {}
-    fallback_evidence = list(reversed(timeline[-3:]))
     dimensions = []
     for key, label, score_field, event_kinds in DIMENSIONS:
         evidence = [item for item in reversed(timeline) if item.get("kind") in event_kinds][:6]
         explanation = explanations.get(score_field)
         if isinstance(explanation, dict):
             explanation = explanation.get("explanation") or explanation.get("summary")
+        if not explanation or _is_formula_copy(explanation):
+            explanation = _dimension_fact_summary(key, evidence)
         dimensions.append(
             {
                 "key": key,
@@ -278,9 +484,9 @@ def build_capability_dimensions(
                 "score": float(profile[score_field]) if profile.get(score_field) is not None else None,
                 "summary": normalize_display_text(
                     explanation,
-                    "该维度根据当前可追溯学习证据计算。",
+                    _dimension_fact_summary(key, evidence),
                 ),
-                "evidence": evidence or fallback_evidence,
+                "evidence": evidence,
             }
         )
     return dimensions
@@ -291,12 +497,20 @@ def _load_learning_rows(student_id: int, limit: int) -> dict[str, list[dict[str,
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
-                SELECT event_id, lab_session_id, module_id, task_id, event_type,
-                       event_time, payload_json
-                FROM learning_event
-                WHERE user_id = %(student_id)s
-                ORDER BY event_time DESC, id DESC
+                f"""
+                SELECT le.event_id, le.lab_session_id, le.module_id, le.task_id,
+                       le.question_id, le.event_type, le.event_time, le.payload_json,
+                       c.course_name, m.module_name, qs.question_snapshot_json
+                FROM learning_event le
+                LEFT JOIN `{USER_SERVICE_SCHEMA}`.`course` c
+                  ON c.id = le.course_id
+                LEFT JOIN `{USER_SERVICE_SCHEMA}`.`module` m
+                  ON m.module_id = le.module_id
+                LEFT JOIN question_submission qs
+                  ON le.event_type = 'QUESTION_SUBMIT'
+                 AND qs.request_id = le.request_id
+                WHERE le.user_id = %(student_id)s
+                ORDER BY le.event_time DESC, le.id DESC
                 LIMIT %(limit)s
                 """,
                 {"student_id": student_id, "limit": limit},
@@ -521,7 +735,99 @@ def build_knowledge_risk_detail(
     }
 
 
-def get_class_risk_map(
+def build_normalized_knowledge_attempts_sql() -> str:
+    """Return one normalized row per persisted attempt and mapped knowledge point."""
+    return f"""
+        SELECT DISTINCT
+            (CONVERT(CONCAT('generated:', gqa.attempt_id) USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS attempt_key,
+            gqa.user_id AS student_id,
+            ts.course_id AS course_id,
+            COALESCE(gq.knowledge_point_id, 0) AS knowledge_point_id,
+            gqa.is_correct,
+            (CONVERT(gqa.answer_json USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS answer_json,
+            gqa.score,
+            gqa.cost_time,
+            gqa.submitted_at,
+            (CONVERT(gq.generated_question_id USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS generated_question_id,
+            (CONVERT(COALESCE(gq.title, '个性化练习题') USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS title,
+            (CONVERT(COALESCE(gq.stem, gq.title, '个性化练习题') USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS stem,
+            gq.question_type,
+            gq.options_json,
+            (CONVERT(COALESCE(gq.reference_answer, gq.explanation, '') USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS standard_answer
+        FROM generated_question_attempt gqa
+        INNER JOIN generated_question gq
+          ON gq.generated_question_id = gqa.generated_question_id
+        INNER JOIN training_session ts
+          ON ts.training_session_id = gq.training_session_id
+
+        UNION ALL
+
+        SELECT DISTINCT
+            (CONVERT(CONCAT('submission:', qs.submission_id) USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS attempt_key,
+            qs.user_id AS student_id,
+            COALESCE(qs.course_id, mc.course_id) AS course_id,
+            COALESCE(explicit_kp.knowledge_point_id, qkp.knowledge_point_id,
+                     tkp.knowledge_point_id, 0) AS knowledge_point_id,
+            qs.is_correct,
+            (CONVERT(qs.answer_json USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS answer_json,
+            qs.score,
+            qs.cost_time,
+            qs.created_at AS submitted_at,
+            (CONVERT(CONCAT(
+                'course-', COALESCE(qs.module_id, 0), '-', COALESCE(qs.task_id, 0), '-',
+                COALESCE(qs.question_uid, CAST(qs.question_id AS CHAR))
+            ) USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS generated_question_id,
+            (CONVERT(COALESCE(
+                JSON_UNQUOTE(JSON_EXTRACT(qs.question_snapshot_json, '$.content')),
+                CONCAT('实验题 ', COALESCE(qs.task_id, 0), '-', qs.question_id)
+            ) USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS title,
+            (CONVERT(COALESCE(
+                JSON_UNQUOTE(JSON_EXTRACT(qs.question_snapshot_json, '$.content')),
+                CONCAT('实验题 ', COALESCE(qs.task_id, 0), '-', qs.question_id)
+            ) USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS stem,
+            qs.question_type,
+            JSON_EXTRACT(qs.question_snapshot_json, '$.options') AS options_json,
+            (CONVERT(COALESCE(CAST(qs.standard_answer_json AS CHAR), '') USING utf8mb4)
+                COLLATE utf8mb4_unicode_ci) AS standard_answer
+        FROM question_submission qs
+        LEFT JOIN `{USER_SERVICE_SCHEMA}`.`module_course` mc
+          ON qs.course_id IS NULL
+         AND mc.module_id = qs.module_id
+        LEFT JOIN knowledge_point explicit_kp
+          ON explicit_kp.knowledge_point_id = qs.knowledge_point_id
+        LEFT JOIN question_knowledge_point qkp
+          ON explicit_kp.knowledge_point_id IS NULL
+         AND (
+              qkp.question_uid = qs.question_uid
+              OR (qkp.question_uid IS NULL AND qkp.question_id = qs.question_id)
+         )
+        LEFT JOIN task_knowledge_point tkp
+          ON explicit_kp.knowledge_point_id IS NULL
+         AND qkp.knowledge_point_id IS NULL
+         AND tkp.module_id = qs.module_id
+         AND tkp.task_id = qs.task_id
+        WHERE qs.user_id IS NOT NULL
+          AND COALESCE(qs.course_id, mc.course_id) IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM generated_question_attempt linked_attempt
+              WHERE linked_attempt.submission_id = qs.submission_id
+          )
+    """
+
+
+def _get_class_risk_map_generated_only(
     teacher_id: int,
     class_id: int,
     course_id: Optional[int] = None,
@@ -604,7 +910,7 @@ def get_class_risk_map(
     return {"teachingClassId": class_id, "courseId": course_id, "items": result_items}
 
 
-def get_knowledge_risk_detail(
+def _get_knowledge_risk_detail_generated_only(
     teacher_id: int,
     class_id: int,
     course_id: int,
@@ -642,6 +948,130 @@ def get_knowledge_risk_detail(
                   AND gq.knowledge_point_id = %(knowledge_point_id)s
                   AND gqa.is_correct = 0
                 ORDER BY gqa.submitted_at DESC, gqa.attempt_id DESC
+                """,
+                {
+                    "class_id": class_id,
+                    "course_id": course_id,
+                    "knowledge_point_id": knowledge_point_id,
+                },
+            )
+            rows = list(cursor.fetchall() or [])
+    return build_knowledge_risk_detail(summary=summary, attempt_rows=rows, page=page, size=size)
+
+
+def get_class_risk_map(
+    teacher_id: int,
+    class_id: int,
+    course_id: Optional[int] = None,
+) -> dict[str, Any]:
+    from teacher_repository import require_owned_teaching_class
+
+    require_owned_teaching_class(teacher_id, class_id)
+    course_filter = "AND attempts.course_id = %(course_id)s" if course_id is not None else ""
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                WITH normalized_attempts AS (
+                    {build_normalized_knowledge_attempts_sql()}
+                )
+                SELECT
+                    attempts.course_id,
+                    c.course_name,
+                    tcc.teaching_order,
+                    attempts.knowledge_point_id,
+                    COALESCE(kp.name, '未标注知识点') AS knowledge_point_name,
+                    COALESCE(kp.category, '待归类') AS knowledge_category,
+                    (SELECT COUNT(*)
+                       FROM `{USER_SERVICE_SCHEMA}`.`teaching_class_student` class_member
+                      WHERE class_member.teaching_class_id = %(class_id)s) AS student_count,
+                    COUNT(DISTINCT attempts.student_id) AS attempted_student_count,
+                    COUNT(DISTINCT CASE WHEN attempts.is_correct = 0 THEN attempts.student_id END)
+                        AS incorrect_student_count,
+                    COUNT(attempts.attempt_key) AS attempted_count,
+                    SUM(CASE WHEN attempts.is_correct = 0 THEN 1 ELSE 0 END) AS incorrect_count,
+                    GROUP_CONCAT(
+                        DISTINCT CASE WHEN attempts.is_correct = 0
+                            THEN CONCAT(attempts.student_id, '::',
+                                COALESCE(u.user_name, u.user_student_number, '未命名学生'))
+                        END SEPARATOR '|||'
+                    ) AS affected_students,
+                    GROUP_CONCAT(
+                        DISTINCT CONCAT(attempts.generated_question_id, '::',
+                            REPLACE(attempts.title, '|||', ''))
+                        ORDER BY attempts.submitted_at DESC SEPARATOR '|||'
+                    ) AS representative_questions
+                FROM normalized_attempts attempts
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs
+                  ON tcs.student_id = attempts.student_id
+                 AND tcs.teaching_class_id = %(class_id)s
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_course` tcc
+                  ON tcc.teaching_class_id = %(class_id)s
+                 AND tcc.course_id = attempts.course_id
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`course` c
+                  ON c.id = attempts.course_id
+                LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u
+                  ON u.user_id = attempts.student_id
+                LEFT JOIN knowledge_point kp
+                  ON kp.knowledge_point_id = attempts.knowledge_point_id
+                WHERE 1 = 1
+                  {course_filter}
+                GROUP BY attempts.course_id, c.course_name, tcc.teaching_order,
+                         attempts.knowledge_point_id, kp.name, kp.category
+                ORDER BY incorrect_student_count DESC, knowledge_point_name
+                """,
+                {"class_id": class_id, "course_id": course_id},
+            )
+            rows = list(cursor.fetchall() or [])
+
+    return {
+        "teachingClassId": class_id,
+        "courseId": course_id,
+        "items": build_knowledge_risk_items(rows, course_id=course_id),
+    }
+
+
+def get_knowledge_risk_detail(
+    teacher_id: int,
+    class_id: int,
+    course_id: int,
+    knowledge_point_id: int,
+    page: int = 1,
+    size: int = 20,
+) -> dict[str, Any]:
+    risk_map = get_class_risk_map(teacher_id, class_id, course_id)
+    summary = next(
+        (
+            item for item in risk_map["items"]
+            if int(item.get("knowledgePointId") or 0) == int(knowledge_point_id)
+        ),
+        None,
+    )
+    if not summary:
+        raise KeyError("knowledge point risk does not exist in selected experiment")
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                WITH normalized_attempts AS (
+                    {build_normalized_knowledge_attempts_sql()}
+                )
+                SELECT attempts.student_id,
+                       COALESCE(u.user_name, u.user_student_number, '未命名学生') AS student_name,
+                       attempts.answer_json, attempts.score, attempts.submitted_at,
+                       attempts.generated_question_id, attempts.title,
+                       attempts.standard_answer
+                FROM normalized_attempts attempts
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs
+                  ON tcs.teaching_class_id = %(class_id)s
+                 AND tcs.student_id = attempts.student_id
+                LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u
+                  ON u.user_id = attempts.student_id
+                WHERE attempts.course_id = %(course_id)s
+                  AND attempts.knowledge_point_id = %(knowledge_point_id)s
+                  AND attempts.is_correct = 0
+                ORDER BY attempts.submitted_at DESC, attempts.attempt_key DESC
                 """,
                 {
                     "class_id": class_id,

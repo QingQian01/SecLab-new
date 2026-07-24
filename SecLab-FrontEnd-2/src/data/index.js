@@ -436,9 +436,8 @@ export const findExperimentById = (id) => {
     return experiment;
   }
   
-  // 如果没有找到，返回默认的SQL注入实验（ID为1）
-  console.log(`未找到ID为${id}的实验，返回默认SQL注入实验`);
-  return SQLInjection;
+  console.log(`未找到ID为${id}的实验`);
+  return undefined;
 };
 
 // 导出实验类型常量，方便前端代码使用
@@ -471,4 +470,4 @@ export const getBeginnerExperiments = () => {
 // 获取高级实验
 export const getAdvancedExperiments = () => {
   return AllExperiments.filter(exp => exp.difficulty >= 4);
-}; 
+};

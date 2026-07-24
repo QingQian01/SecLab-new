@@ -29,6 +29,7 @@ import {
 } from '../../../api'
 import { showToast, useCookie } from '../../../common'
 import TeacherAssignments from './TeacherAssignments.vue'
+import { hasProfileLearningEvidence } from './profileEvidence'
 
 type SolveRecord = ProfileDashboardResponse['solveRecords'][number]
 type LoginStorageUser = Partial<User> & {
@@ -105,19 +106,6 @@ type RecommendationPracticeQuestion = TrainingQuestionSetItem & {
   level: string
   briefFeedback: string
   expanded: boolean
-}
-
-type TrainingRecommendationCard = {
-  id: string
-  title: string
-  difficulty: string
-  difficultyClass: string
-  type: string
-  tags: string[]
-  reason: string
-  moduleId?: number | null
-  taskId?: number | null
-  source: WeakKnowledgePoint
 }
 
 type TrainingQuestionViewModel = GeneratedTrainingQuestion & {
@@ -403,10 +391,6 @@ function hasMeaningfulDashboardData(profileDashboard: ProfileDashboardResponse |
   return hasStats || hasSkills || hasTags || hasRecords
 }
 
-function hasMeaningfulLatestProfile(profile: ProfileLatestResponse | null) {
-  return Boolean(profile?.snapshot_id || profile?.overall_score || profile?.knowledge_mastery_score)
-}
-
 const displayUserImage = computed(() => {
   const image = user.value.userImage?.trim()
   return image || ''
@@ -423,7 +407,14 @@ const currentCourseId = computed(() => {
 })
 
 const currentProfileSnapshotId = computed(() => {
-  return trainingDiagnoseResult.value?.profile_snapshot_id ?? latestProfile.value?.snapshot_id ?? null
+  const diagnosis = trainingDiagnoseResult.value
+  const hasDiagnosisEvidence = Boolean(
+    diagnosis?.weak_knowledge_points?.length ||
+    diagnosis?.recent_evidence?.recent_errors?.length ||
+    diagnosis?.recent_evidence?.recent_failed_tasks?.length ||
+    diagnosis?.recent_evidence?.recent_ai_topics?.length
+  )
+  return latestProfile.value?.snapshot_id ?? (hasDiagnosisEvidence ? diagnosis?.profile_snapshot_id : null) ?? null
 })
 
 const latestProfileComputedAt = computed(() => {
@@ -510,7 +501,7 @@ const recentTrainingCards = computed(() => {
       id: session.training_session_id,
       title: index === 0 ? '最近一次专项训练' : `历史训练 ${index + 1}`,
       time: session.created_at ? session.created_at.replace('T', ' ').slice(0, 16) : '近期生成',
-      desc: `共生成 ${session.question_count || 0} 题，已完成 ${session.attempt_count || 0} 次作答，训练结果会直接回流到画像评估。`
+      desc: `共 ${session.question_count || 0} 题，已完成 ${session.attempt_count || 0} 次作答。`
     }))
   }
 
@@ -520,7 +511,7 @@ const recentTrainingCards = computed(() => {
       title: currentProfileSnapshotId.value ? '首轮画像训练待开始' : '暂无学习记录',
       time: currentProfileSnapshotId.value ? '随时可发起' : '--',
       desc: currentProfileSnapshotId.value
-        ? '系统已根据当前画像准备好训练路径，点击“开始练习”即可生成第一轮个性化题目。'
+        ? '点击“开始练习”进入个性化训练。'
         : EMPTY_PROFILE_MESSAGE
     }
   ]
@@ -637,50 +628,6 @@ const profileAnalysisDimensions = computed<AnalysisDimensionCard[]>(() => {
       iconClass: tone.iconClass
     }
   })
-})
-
-const aiRecommendedTasks = computed(() => {
-  const diagnose = trainingDiagnoseResult.value
-  const tones = [
-    { borderClass: 'border-primary', iconClass: 'text-primary' },
-    { borderClass: 'border-error', iconClass: 'text-error' },
-    { borderClass: 'border-info', iconClass: 'text-info' },
-    { borderClass: 'border-secondary', iconClass: 'text-secondary' }
-  ]
-
-  const analysisDimensions: AnalysisDimensionCard[] = (diagnose?.weak_dimensions || []).map((dimension, index) => {
-    const tone = tones[index % tones.length]
-    return {
-      icon: getDimensionIcon(dimension),
-      label: dimension,
-      desc: getDimensionDescription(dimension, index),
-      borderClass: tone.borderClass,
-      iconClass: tone.iconClass
-    }
-  })
-
-  const difficulty = diagnose?.generation_constraints?.difficulty || 'medium'
-  const generatedQuestions: TrainingRecommendationCard[] = (diagnose?.weak_knowledge_points || []).map((point) => ({
-    id: `${point.knowledge_point_id ?? 'approx'}-${point.module_id ?? 'm'}-${point.task_id ?? 't'}-${point.name}`,
-    title: point.name,
-    difficulty: difficultyLabel(difficulty),
-    difficultyClass: difficultyBadgeClass(difficulty),
-    type: point.evidence_level === 'approximate' ? '近似诊断' : '精准诊断',
-    tags: [
-      point.category || '知识点',
-      point.evidence_level === 'approximate' ? 'module/task 近似推断' : '画像证据',
-      point.difficulty_level || '训练推荐'
-    ].filter(Boolean),
-    reason: point.reason,
-    moduleId: point.module_id,
-    taskId: point.task_id,
-    source: point
-  }))
-
-  return {
-    analysisDimensions,
-    generatedQuestions
-  }
 })
 
 function getDimensionIcon(dimension: string) {
@@ -1098,32 +1045,6 @@ async function handleRecommendationPracticeAction(item: ProfileRecommendationCar
   })
 }
 
-function getDimensionDescription(dimension: string, index: number) {
-  const diagnose = trainingDiagnoseResult.value
-  const point = diagnose?.weak_knowledge_points?.[index]
-  const evidence = diagnose?.recent_evidence
-  const aiTopics = evidence?.recent_ai_topics?.slice(0, 2).join('、')
-  const errors = evidence?.recent_errors?.slice(0, 2).join('、')
-  const failedTaskCount = evidence?.recent_failed_tasks?.length || 0
-
-  if (dimension === '知识掌握' && point) {
-    return `当前重点薄弱知识点为「${point.name}」，${point.reason}`
-  }
-  if (dimension === '自主探索' && aiTopics) {
-    return `近期 AI 求助主题集中在 ${aiTopics}，建议通过针对性练习逐步摆脱卡点。`
-  }
-  if (dimension === '学习投入') {
-    return failedTaskCount > 0 ? `近期存在 ${failedTaskCount} 个失败任务记录，训练结果会直接回流到投入度画像。` : '近期训练数据偏少，可通过专项练习补足画像证据。'
-  }
-  if (dimension === 'AI协同' && aiTopics) {
-    return `当前协同热点集中在 ${aiTopics}，系统会继续围绕这些主题出题。`
-  }
-  if (dimension === '排障能力' && errors) {
-    return `近期错误摘要包括 ${errors}，训练题会优先覆盖相近错误模式。`
-  }
-  return point?.reason || '系统根据画像、做题与实验行为综合诊断出了这一薄弱维度。'
-}
-
 function difficultyLabel(level?: string | null) {
   switch (level) {
     case 'hard':
@@ -1221,7 +1142,7 @@ async function fetchLatestProfileData(userId: number) {
   if (!userId) return null
   try {
     const latest = await getProfileLatest(userId)
-    if (hasMeaningfulLatestProfile(latest)) {
+    if (hasProfileLearningEvidence(latest)) {
       pageNotice.value = ''
       latestProfile.value = latest
       return latest
@@ -1779,10 +1700,10 @@ onMounted(() => {
             学生学习画像分析
           </h2>
           <div v-if="isLoadingDashboard" class="text-sm text-base-content/60 mb-4">
-            正在同步数据库画像...
+            正在加载学习分析...
           </div>
           <div v-else-if="!dashboardLoaded && !dashboardError" class="text-sm text-base-content/60 mb-4">
-            当前画像快照正在生成中，系统会根据最近学习与训练表现自动更新分析结果。
+            完成课程练习或实验后，这里会展示你的学习情况。
           </div>
 
           <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2465,42 +2386,6 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="card bg-base-100 shadow-xl mt-6 relative overflow-hidden border border-secondary/20">
-        <div class="card-body relative z-10">
-          <div class="flex items-center justify-between mb-4">
-            <h2 class="text-xl font-semibold flex items-center gap-2">
-              <i class="fas fa-book-open text-secondary text-2xl"></i>
-              知识点专项训练（后续增强）
-            </h2>
-          </div>
-
-          <p class="text-sm text-base-content/80 mb-6 leading-relaxed">
-            这一区域仍来自训练诊断链路，用于后续扩展知识点级专项训练。当前主推荐来源已经统一为上方画像推荐任务。
-          </p>
-
-          <div v-if="aiRecommendedTasks.generatedQuestions.length" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 hover:cursor-pointer">
-            <div v-for="task in aiRecommendedTasks.generatedQuestions.slice(0, 4)" :key="task.id" class="card bg-base-100 shadow-md border hover:border-secondary transition-all hover:-translate-y-1">
-              <figure class="px-4 pt-4 relative">
-                <div class="rounded-xl h-32 w-full bg-gradient-to-br from-secondary/20 via-primary/10 to-accent/20 flex items-center justify-center">
-                  <i class="fas fa-crosshairs text-4xl text-secondary/70"></i>
-                </div>
-                <div class="absolute top-6 right-6 badge badge-error font-bold shadow-sm">{{ task.type }}</div>
-              </figure>
-              <div class="card-body p-4 items-center text-center">
-                <h2 class="card-title text-base font-bold">{{ task.title }}</h2>
-                <p class="text-xs text-base-content/60 mt-1 line-clamp-2">{{ task.reason }}</p>
-                <div class="w-full mt-3">
-                  <button class="btn btn-secondary btn-sm w-full btn-outline" :disabled="generatingQuestions" @click="startTraining(task.source)">去复习</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div v-else class="text-base-content/60 text-center py-6 bg-base-200/40 rounded-box">
-            当前未生成可展示的专项训练题目，主推荐请以上方画像推荐任务为准。
-          </div>
-        </div>
-      </div>
-
       <div class="card bg-base-100 shadow-xl mb-6 mt-8">
         <div class="card-body">
           <h2 class="text-xl font-semibold mb-4">
@@ -2552,11 +2437,8 @@ onMounted(() => {
               强化专项训练
             </h2>
             <p class="text-sm text-base-content/60 mt-1">
-              逐题提交后会复用训练提交主链，并在触发画像重建后同步刷新本页数据。
+              请依次完成以下题目，提交后可查看作答结果。
             </p>
-            <div class="mt-2 flex flex-wrap gap-2 text-xs text-base-content/50">
-              <span v-if="activeTrainingSessionId" class="badge badge-outline">Session {{ activeTrainingSessionId }}</span>
-            </div>
           </div>
           <button class="btn btn-outline btn-sm gap-2" @click="exitTraining">
             <i class="fas fa-sign-out-alt"></i> 返回画像页

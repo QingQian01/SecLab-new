@@ -415,6 +415,24 @@ def _collect_stats(cursor, user_id: int) -> dict[str, Any]:
     }
 
 
+LEARNING_EVIDENCE_KEYS = (
+    "question_submit_count",
+    "flag_submit_count",
+    "lab_session_count",
+    "completed_lab_count",
+    "ai_interaction_count",
+    "ai_ask_count",
+    "ai_user_message_count",
+    "command_count",
+    "file_change_count",
+    "error_count",
+)
+
+
+def _has_learning_evidence(stats: dict[str, int]) -> bool:
+    return any(int(stats.get(key) or 0) > 0 for key in LEARNING_EVIDENCE_KEYS)
+
+
 def _score_profile(stats: dict[str, int]) -> tuple[dict[str, float], dict[str, Any]]:
     q_rate = _ratio(stats["question_correct_count"], stats["question_submit_count"])
     course_q_rate = _ratio(stats["course_question_correct_count"], stats["course_question_submit_count"])
@@ -462,9 +480,9 @@ def _score_profile(stats: dict[str, int]) -> tuple[dict[str, float], dict[str, A
     context_signal = 1 if stats["ai_context_injection_count"] > 0 or stats["ai_context_message_count"] > 0 else 0
     ai_followup_activity = stats["command_count"] + stats["file_change_count"] + stats["question_submit_count"] + stats["flag_submit_count"]
     if ai_user == 0 and context_signal == 0:
-        contextual_help_quality_score = 60.0
-        post_ai_action_conversion_score = 60.0
-        ai_usage_moderation_score = 60.0
+        contextual_help_quality_score = 0.0
+        post_ai_action_conversion_score = 0.0
+        ai_usage_moderation_score = 0.0
     else:
         contextual_help_quality_score = _clamp(
             min(100, stats["ai_context_injection_count"] * 30 + stats["ai_context_message_count"] * 12)
@@ -944,9 +962,13 @@ def rebuild_student_profile(user_id: int) -> dict[str, Any]:
             source_start, source_end = _collect_source_range(cursor, user_id)
             stats = _collect_stats(cursor, user_id)
             scores, explanations = _score_profile(stats)
-            strengths, weaknesses = _strengths_and_weaknesses(scores)
             catalog = _load_catalog_resources(cursor)
-            recommendations = _build_recommendations(scores, catalog)
+            has_learning_evidence = _has_learning_evidence(stats)
+            if has_learning_evidence:
+                strengths, weaknesses = _strengths_and_weaknesses(scores)
+                recommendations = _build_recommendations(scores, catalog)
+            else:
+                strengths, weaknesses, recommendations = [], [], []
             context = _latest_context(cursor, user_id)
             summary = {
                 "source_strategy": "当前没有稳定知识标签表，知识掌握按 module_id/task_id 粒度的题目、Flag、实验完成证据替代。",

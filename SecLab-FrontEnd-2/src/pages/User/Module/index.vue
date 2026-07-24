@@ -5,10 +5,8 @@ import type { DisplayQuestionType } from '../../../types/Question';
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import type {Experiment} from "../../../types/experiment.ts";
 import type { Module } from './index.ts';
-import { convertExperimentToModule } from './index.ts';
 import axios from 'axios'
 import { getModuleDetail, getUserInfo, startLabSession, submitFlagAnswer, submitQuestionAnswer, ingestEvents } from '../../../api';
-import { findExperimentById } from '../../../data';
 import {
   setLabRunning,
   clearLab,
@@ -27,6 +25,7 @@ const route = useRoute();
 const router = useRouter();
 const moduleId = route.params.id;
 const isLoading = ref(true);
+const loadError = ref(false);
 const cookie = useCookie();
 const moduleStartedAt = Date.now();
 const showEndExperimentModal = ref(false)
@@ -103,33 +102,19 @@ onMounted(async () => {
       throw new Error('无效的模块ID');
     }
     
-    // 尝试从API获取数据，如果失败则使用本地数据
-    try {
-      console.log(`尝试从API获取ID为${id}的模块数据`);
-      const response = await getModuleDetail(id);
-      if (response.isSuccess === 1) {
-        experiment.value = response.data as Module;
-        console.log(`成功从API加载模块 #${id}: ${experiment.value.name}，实际ID: ${experiment.value.id}`);
-      } else {
-        console.warn(`API返回错误，尝试使用本地数据`);
-        throw new Error('API返回错误');
-      }
-    } catch (error) {
-      // 如果API调用失败，尝试使用本地数据
-      console.log(`从本地数据查找ID为${id}的模块`);
-      const localModule = findExperimentById(id);
-      if (localModule) {
-        // 转换为Module类型
-        experiment.value = convertExperimentToModule(localModule);
-        // 确保ID保持一致，不被覆盖
-        const originalId = experiment.value.id;
-        experiment.value.id = id;
-        console.log(`使用本地数据加载模块 #${id}: ${experiment.value.name}，原始ID: ${originalId}，修正后ID: ${experiment.value.id}`);
-      } else {
-        console.error(`找不到ID为${id}的模块`);
-        throw new Error(`找不到指定ID(${id})的模块`);
-      }
+    const requestedCourseId = Number(route.query.courseId);
+    const courseContext = Number.isInteger(requestedCourseId) && requestedCourseId > 0
+      ? requestedCourseId
+      : undefined;
+    const response = await getModuleDetail(id, courseContext);
+    if (response.isSuccess !== 1 || !response.data) {
+      throw new Error('实验详情不存在');
     }
+    const loadedModule = response.data as Module;
+    if (!courseContext && (loadedModule.courseIds?.length || 0) > 1) {
+      throw new Error('该实验属于多个课程，请从具体课程页面进入');
+    }
+    experiment.value = loadedModule;
     
     // 在数据加载完成后再次确认ID是否正确
     console.log(`最终加载的模块: ID=${experiment.value.id}, 名称=${experiment.value.name}`);
@@ -164,6 +149,7 @@ onMounted(async () => {
     }
   } catch (error) {
     console.error('加载模块数据失败:', error);
+    loadError.value = true;
     // 使用内联通知替代alert
     pointsNotification.value = {
       show: true,
@@ -377,7 +363,7 @@ const cleanUrl = (url: string): string => {
   return url;
 };
 
-const getDockerLabKey = (baseId: number): string => {
+const getDockerLabKey = (baseId: number): string | null => {
   switch (baseId) {
     case 1:
       return 'sqli';
@@ -392,7 +378,7 @@ const getDockerLabKey = (baseId: number): string => {
     case 6:
       return 'dir';
     default:
-      return 'sqli';
+      return null;
   }
 };
 
@@ -426,11 +412,14 @@ const applyTargetStatus = (statusData: DockerTargetStatus | null) => {
 
 const fetchTargetStatus = async (baseId = getBaseLabId()) => {
   const labKey = getDockerLabKey(baseId);
+  if (!labKey) {
+    throw new Error('本实验暂未配置靶机环境');
+  }
   const response = await axios.get(`${DOCKER_API_URL}/api/docker/target-status/${labKey}`);
   return response.data?.data as DockerTargetStatus;
 };
 
-const getDockerStartEndpoint = (baseId: number): string => {
+const getDockerStartEndpoint = (baseId: number): string | null => {
   switch (baseId) {
     case 1:
       return '/api/docker/start-sqli';
@@ -445,9 +434,16 @@ const getDockerStartEndpoint = (baseId: number): string => {
     case 6:
       return '/api/docker/start-dir';
     default:
-      return '/api/docker/start-sqli';
+      return null;
   }
 };
+
+const hasTargetEnvironment = computed(() =>
+  Boolean(
+    experiment.value.targetMachine
+    && getDockerStartEndpoint(getBaseLabId()),
+  ),
+);
 
 const getDefaultTargetUrl = (_baseId: number): string => '';
 
@@ -465,14 +461,14 @@ const registerOnlineTargetSession = async (baseId: number) => {
     currentLabContainer: containerName,
     targetUrl: targetMachineUrl.value,
     targetMachineUrl: targetMachineUrl.value,
-    courseId: null
+    courseId: experiment.value.courseId ?? null
   })
 
   try {
     const userContext = await getCurrentUserContext()
     const session = await startLabSession({
       ...userContext,
-      course_id: null,
+      course_id: experiment.value.courseId ?? null,
       module_id: Number(moduleId),
       task_id: null,
       container_name: containerName,
@@ -517,6 +513,16 @@ const refreshTargetMachineStatus = async () => {
 // 修改启动靶机函数
 const startTargetMachine = async () => {
   if (isTargetLoading.value) return; // 防止重复点击
+  const baseId = getBaseLabId();
+  const startEndpoint = getDockerStartEndpoint(baseId);
+  if (!startEndpoint || !experiment.value.targetMachine) {
+    pointsNotification.value = {
+      show: true,
+      message: '本实验暂未配置靶机环境',
+    };
+    clearPointsNotification();
+    return;
+  }
   isTargetLoading.value = true;
   const minLoadingTime = 3000; // 最少显示3秒
   const startTime = Date.now();
@@ -527,8 +533,7 @@ const startTargetMachine = async () => {
       experiment.value.id = urlId;
     }
 
-    const baseId = getBaseLabId();
-    const response = await axios.post(`${DOCKER_API_URL}${getDockerStartEndpoint(baseId)}`);
+    const response = await axios.post(`${DOCKER_API_URL}${startEndpoint}`);
     const statusData = response.data?.data as DockerTargetStatus | null;
     applyTargetStatus(statusData);
 
@@ -572,7 +577,7 @@ const startTargetMachine = async () => {
   let url: string | null = null;
   try {
     // 根据模块ID确定正确的API端点
-    let apiEndpoint = '/api/docker/start-sqli';
+    let apiEndpoint: string | null = null;
     
     // 获取当前模块的基础ID（对于101-104等变体，获取其基础类型）
     const currentId = experiment.value.id;
@@ -611,8 +616,7 @@ const startTargetMachine = async () => {
         apiEndpoint = '/api/docker/start-dir';
         break;
       default:
-        console.log(`未知的基础ID ${baseId}，默认使用SQL注入靶机`);
-        apiEndpoint = '/api/docker/start-sqli';
+        throw new Error(`实验 ${baseId} 暂未配置靶机环境`);
     }
     
     console.log(`启动靶机，模块ID: ${currentId}, 基础ID: ${baseId}, 使用API: ${apiEndpoint}`);
@@ -760,13 +764,13 @@ const startTargetMachine = async () => {
           currentLabContainer: containerName,
           targetUrl: targetMachineUrl.value,
           targetMachineUrl: targetMachineUrl.value,
-          courseId: null
+          courseId: experiment.value.courseId ?? null
         })
         try {
           const userContext = await getCurrentUserContext()
           const session = await startLabSession({
             ...userContext,
-            course_id: null,
+            course_id: experiment.value.courseId ?? null,
             module_id: Number(moduleId),
             task_id: null,
             container_name: containerName,
@@ -865,7 +869,7 @@ const buildEventsPayload = async () => {
       event_time: event.event_time,
       user_id: userContext.user_id,
       class_id: userContext.class_id,
-      course_id: null,
+      course_id: experiment.value.courseId ?? null,
       module_id: Number(moduleId),
       task_id: null,
       question_id: null,
@@ -882,7 +886,7 @@ const buildEventsPayload = async () => {
     event_time: new Date().toISOString(),
     user_id: userContext.user_id,
     class_id: userContext.class_id,
-    course_id: null,
+    course_id: experiment.value.courseId ?? null,
     module_id: Number(moduleId),
     task_id: null,
     question_id: null,
@@ -904,7 +908,7 @@ const buildEventsPayload = async () => {
     user_context: {
       user_id: userContext.user_id,
       class_id: userContext.class_id,
-      course_id: null,
+      course_id: experiment.value.courseId ?? null,
       module_id: Number(moduleId),
       task_id: null,
       question_id: null,
@@ -1015,7 +1019,7 @@ const submitQuestionToBackend = async (taskId: number, questionId: number) => {
       const flagText = Array.isArray(submittedAnswer) ? submittedAnswer.join(',') : String(submittedAnswer ?? '')
       const response = await submitFlagAnswer({
         ...userContext,
-        course_id: null,
+        course_id: experiment.value.courseId ?? null,
         module_id: Number(moduleId),
         task_id: taskId,
         lab_session_id: labSessionId.value,
@@ -1045,9 +1049,10 @@ const submitQuestionToBackend = async (taskId: number, questionId: number) => {
 
     const response = await submitQuestionAnswer({
       ...userContext,
-      course_id: null,
+      course_id: experiment.value.courseId ?? null,
       module_id: Number(moduleId),
       task_id: taskId,
+      lab_session_id: labSessionId.value || getLabSessionId() || null,
       question_id: questionId,
       question_type: question.type,
       answer: submittedAnswer,
@@ -1335,7 +1340,7 @@ const copyToClipboard = (text: string) => {
     </div>
     
     <!-- 错误状态 -->
-    <div v-else-if="!experiment" class="flex justify-center items-center h-screen">
+    <div v-else-if="loadError" class="flex justify-center items-center h-screen">
       <div class="text-center">
         <div class="text-error text-5xl mb-4">
           <i class="fas fa-exclamation-circle"></i>
@@ -1427,6 +1432,7 @@ const copyToClipboard = (text: string) => {
                     实时环境
                   </span>
                   <button
+                    v-if="hasTargetEnvironment"
                     id="start-target-btn"
                     class="btn btn-sm"
                     :class="isTargetMachineRunning ? 'btn-error' : 'btn-primary'"
@@ -1437,6 +1443,7 @@ const copyToClipboard = (text: string) => {
                     <i :class="isTargetMachineRunning ? 'fas fa-stop' : 'fas fa-play'" class="mr-1" v-else></i>
                     {{ isTargetLoading ? '正在启动靶机...' : isTargetMachineRunning ? '结束实验' : '开始挑战' }}
                   </button>
+                  <span v-else class="text-sm text-base-content/60">本实验暂未配置靶机环境</span>
                   <div v-if="isTargetLoading" class="text-sm text-info">靶机环境正在准备中，请稍候...</div>
                   <div v-else-if="isTargetMachineRunning" class="text-sm text-success">
                     靶机已启动，可以在右侧查看

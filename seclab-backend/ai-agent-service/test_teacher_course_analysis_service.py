@@ -1,11 +1,15 @@
+import asyncio
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, Mock, patch
 
 from teacher_course_analysis_service import (
     TeacherCourseAnalysisRepository,
-    build_course_analysis_fallback,
     build_course_question_summary,
+    collect_course_question_records,
+    run_course_analysis,
 )
+from training_repository import DEFAULT_TASK_KP
 
 
 class TeacherCourseQuestionSummaryTest(unittest.TestCase):
@@ -54,21 +58,6 @@ class TeacherCourseQuestionSummaryTest(unittest.TestCase):
         self.assertEqual(summary["knowledgePoints"][0]["incorrectQuestionCount"], 1)
         self.assertEqual(summary["knowledgePoints"][0]["affectedStudentCount"], 1)
 
-    def test_fallback_is_course_evidence_not_dimension_categories(self):
-        analysis = build_course_analysis_fallback(
-            self.records,
-            scope="student",
-            course={"courseId": 2, "courseName": "XSS与CSRF攻击"},
-        )
-
-        self.assertEqual(analysis["scope"], "student_course")
-        self.assertTrue(analysis["fallbackUsed"])
-        self.assertEqual(analysis["courseId"], 2)
-        self.assertIn("XSS输出上下文", analysis["overallComment"])
-        self.assertTrue(analysis["knowledgeFindings"])
-        self.assertTrue(analysis["representativeMistakes"])
-
-
 class TeacherCourseAnalysisRepositoryTest(unittest.TestCase):
     def setUp(self):
         self.store = {}
@@ -93,9 +82,122 @@ class TeacherCourseAnalysisRepositoryTest(unittest.TestCase):
 
         result = self.repository.get_latest(7, 101, 2, "STUDENT", 21)
 
-        self.assertEqual(result["analysisStatus"], "READY")
-        self.assertEqual(result["analysis"]["overallComment"], "旧结果")
+        self.assertEqual(result["analysisStatus"], "FAILED")
+        self.assertIsNone(result["analysis"])
         self.assertEqual(result["lastErrorMessage"], "Dify超时")
+
+    def test_legacy_fallback_result_is_not_returned(self):
+        self.repository.save_success(
+            7,
+            101,
+            2,
+            "CLASS",
+            0,
+            self.cutoff,
+            {"generatedBy": "course_evidence_fallback", "fallbackUsed": True},
+            {},
+        )
+
+        result = self.repository.get_latest(7, 101, 2, "CLASS", 0)
+
+        self.assertEqual(result["analysisStatus"], "IDLE")
+        self.assertIsNone(result["analysis"])
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self.rows = rows
+        self.sql = ""
+        self.params = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, sql, params=None):
+        self.sql = sql
+        self.params = params or {}
+
+    def fetchall(self):
+        return self.rows
+
+
+class _FakeConnection:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def cursor(self):
+        return self._cursor
+
+
+class TeacherCourseRealSubmissionTest(unittest.TestCase):
+    def test_sql_injection_detection_task_has_a_knowledge_point_mapping(self):
+        self.assertIn((1, 3, 102), DEFAULT_TASK_KP)
+
+    def test_collects_persisted_course_question_submissions_for_teaching_class(self):
+        cursor = _FakeCursor([
+            {
+                "attempt_key": "submission:sub-1",
+                "student_id": 295,
+                "course_id": 1,
+                "knowledge_point_id": 102,
+                "knowledge_point_name": "SQL盲注与时间延迟判断",
+                "is_correct": 1,
+                "answer_json": "[1]",
+                "score": 4,
+                "cost_time": 35,
+                "submitted_at": datetime(2026, 7, 24, 12, 18),
+                "generated_question_id": "1",
+                "title": "实验题 3-1",
+                "standard_answer": "[1]",
+                "student_name": "姜理想",
+                "student_number": "2023210405029",
+                "teaching_class_name": "网络安全232班",
+            },
+        ])
+        current_user = {"user_id": 1, "role": "teacher"}
+
+        with (
+            patch("teacher_course_analysis_service.require_course_in_owned_class", return_value={"courseId": 1, "courseName": "SQL注入基础实验"}),
+            patch("teacher_course_analysis_service.require_student_in_owned_teaching_class"),
+            patch("teacher_course_analysis_service.get_connection", return_value=_FakeConnection(cursor)),
+        ):
+            result = collect_course_question_records(1, 1, current_user, student_id=295)
+
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["student"]["studentId"], 295)
+        self.assertEqual(result["items"][0]["attemptHistory"][0]["isCorrect"], True)
+        self.assertIn("teaching_class_student", cursor.sql)
+        self.assertEqual(cursor.params["class_id"], 1)
+        self.assertEqual(cursor.params["course_id"], 1)
+
+    def test_analysis_provider_failure_is_not_replaced_with_fallback(self):
+        current_user = {"user_id": 1, "role": "teacher"}
+        evidence = {
+            "items": [{"generatedQuestionId": "course-295-1-3-1", "attemptHistory": [{"isCorrect": True}]}],
+            "summary": {"questionCount": 1},
+            "course": {"courseId": 1, "courseName": "SQL注入基础实验"},
+        }
+        repository = Mock()
+
+        with (
+            patch("teacher_course_analysis_service.collect_course_question_records", return_value=evidence),
+            patch("teacher_course_analysis_service._call_dify_for_student_analysis", new=AsyncMock(side_effect=RuntimeError("provider down"))),
+            patch("teacher_course_analysis_service.COURSE_ANALYSIS_REPOSITORY", repository),
+        ):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(run_course_analysis(1, 1, current_user))
+
+        repository.save_failure.assert_called_once()
+        repository.save_success.assert_not_called()
 
 
 if __name__ == "__main__":

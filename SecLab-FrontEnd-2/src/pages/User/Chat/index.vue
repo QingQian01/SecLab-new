@@ -113,7 +113,7 @@
                       <i class="fas fa-shield-alt text-xs sm:text-sm text-white"></i>
                     </div>
                   </div>
-                  <div class="chat-bubble chat-bubble-neutral p-0">
+                  <div class="chat-bubble assistant-bubble p-0">
                     <!-- 思考过程部分 - 可折叠面板 -->
                     <div v-if="message.thinking && message.showThinking" class="collapse collapse-arrow bg-base-200/30 mb-3 rounded-lg">
                       <input type="checkbox" class="min-h-0" checked /> 
@@ -231,9 +231,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue'
-import DOMPurify from 'dompurify'
-import OpenAI from 'openai'
 import MarkdownRenderer from '../../../components/MarkdownRenderer.vue'
+import { getStoredCurrentUser } from '../../../auth'
+import { streamAiChat } from './chatClient'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -245,13 +245,6 @@ interface Message {
   showThinking?: boolean  // 添加标记，指示这条消息是否要显示思考过程
 }
 
-// OpenAI客户端实例
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY || '', // 从环境变量获取API密钥
-  dangerouslyAllowBrowser: true, // 允许在浏览器中使用（仅开发环境）
-  baseURL:import.meta.env.VITE_BASE_URL || ''
-})
-
 const messages = ref<Message[]>([])
 const inputMessage = ref('')
 const isLoading = ref(false)
@@ -259,6 +252,7 @@ const chatContainer = ref<HTMLElement | null>(null)
 const inputField = ref<HTMLTextAreaElement | null>(null)
 const enableThinking = ref(false)
 const showThinking = ref(false)
+const conversationId = ref('')
 
 // 添加平台相关的背景信息
 const platformInfo = {
@@ -563,91 +557,32 @@ ${platformInfo.learningPath}
 - 根据问题自然地引用相关实验模块，鼓励用户尝试相关实验`
 }
 
-// 调用OpenAI API
+// 通过本地 AI 服务转发请求，密钥只保存在服务端。
 const callOpenAI = async (userQuestion: string, messageIndex: number) => {
-  if (!openai.apiKey) {
-    messages.value[messageIndex].content = '错误：未配置API密钥，请联系管理员设置VITE_OPENAI_API_KEY环境变量。'
-    return
-  }
-
   messages.value[messageIndex].isStreaming = true
   messages.value[messageIndex].streamContent = ''
-  
-  // 初始化思考过程流内容并记录消息的思考显示状态
-  messages.value[messageIndex].showThinking = enableThinking.value
-  if (enableThinking.value) {
-    messages.value[messageIndex].thinking = ''
-  }
-  
+
   try {
-    // 构建消息历史
-    const messageHistory = messages.value
-      .slice(0, messageIndex)
-      .map(msg => {
-        if (msg.role === 'user') {
-          // 向用户消息添加平台相关上下文
-          return {
-            role: msg.role,
-            content: isPlatformRelatedQuestion(msg.content) ? enhanceUserQuestion(msg.content) : msg.content
-          }
-        }
-        return {
-          role: msg.role,
-          content: msg.content
-        }
-      })
-    
-    // 添加增强的系统消息
-    messageHistory.unshift({
-      role: 'system',
-      content: getSystemPrompt()
-    } as any)
-
-    // 构建请求参数
-    const requestParams: any = {
-      model: enableThinking.value ? 'deepseek-reasoner' : 'deepseek-chat',
-      messages: messageHistory,
-      temperature: 0.7,
-      stream: true,
-    }
-    
-    // 使用OpenAI SDK的流式API
-    const stream = await openai.chat.completions.create(requestParams)
-
     let completeResponse = ''
-    let completeThinking = ''
-    
-    // 处理流式响应
-    for await (const chunk of stream) {
-      // 处理普通内容
-      const content = chunk.choices[0]?.delta?.content || ''
-      if (content) {
-        completeResponse += content
+    const currentUser = getStoredCurrentUser()
+    const result = await streamAiChat({
+      query: userQuestion,
+      conversationId: conversationId.value,
+      user: currentUser?.userId ? `student-${currentUser.userId}` : 'student',
+      inputs: { thinking: enableThinking.value },
+      onAnswer: (chunk) => {
+        completeResponse += chunk
         messages.value[messageIndex].streamContent = completeResponse
-        // 在每次更新内容后都滚动到底部
-        nextTick(() => {
-          scrollToBottom()
-        })
-      }
-      
-      // 处理思考过程
-      if (enableThinking.value) {
-        const reasoningContent = chunk.choices[0]?.delta?.reasoning_content || ''
-        if (reasoningContent) {
-          completeThinking += reasoningContent
-          messages.value[messageIndex].thinking = completeThinking
-        }
-      }
-    }
-    
-    // 更新最终完整回答
-    messages.value[messageIndex].content = completeResponse
+        nextTick(scrollToBottom)
+      },
+    })
+    conversationId.value = result.conversationId
+    messages.value[messageIndex].content = completeResponse || '暂时没有收到回复，请稍后再试。'
     messages.value[messageIndex].isStreaming = false
-    
-    
   } catch (error: any) {
+    console.error('AI 助手请求失败:', error)
     messages.value[messageIndex].streamContent = ''
-    messages.value[messageIndex].content = `调用API时出错: ${error.message || '未知错误'}`
+    messages.value[messageIndex].content = 'AI 助手暂时无法响应，请稍后重试。'
     messages.value[messageIndex].isStreaming = false
   }
 }
@@ -722,6 +657,12 @@ onMounted(() => {
   max-width: 80%; /* 修改气泡最大宽度 */
   word-break: break-word;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* 添加轻微阴影 */
+}
+
+:deep(.assistant-bubble) {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+  border: 1px solid #e5e7eb;
 }
 
 :deep(.chat-bubble a) {

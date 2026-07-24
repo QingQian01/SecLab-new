@@ -1,10 +1,70 @@
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 import teacher_learning_insight_repository as insights
 
 
 class TeacherLearningInsightHelpersTest(unittest.TestCase):
+    def test_learning_row_query_interpolates_user_service_schema(self):
+        executed_sql = []
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def execute(self, sql, _params):
+                executed_sql.append(sql)
+
+            def fetchall(self):
+                return []
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def cursor(self):
+                return Cursor()
+
+        with patch.object(insights, "get_connection", return_value=Connection()):
+            insights._load_learning_rows(295, 20)
+
+        self.assertIn("`userservice`.`course`", executed_sql[0])
+        self.assertNotIn("{USER_SERVICE_SCHEMA}", executed_sql[0])
+
+    def test_normalized_knowledge_attempts_include_static_experiment_submissions(self):
+        sql = insights.build_normalized_knowledge_attempts_sql()
+
+        self.assertIn("generated_question_attempt", sql)
+        self.assertIn("question_submission", sql)
+        self.assertIn("UNION ALL", sql)
+        self.assertIn("task_knowledge_point", sql)
+        self.assertIn("module_course", sql)
+        self.assertIn("NOT EXISTS", sql)
+
+    def test_explicit_course_and_knowledge_point_do_not_expand_fallback_joins(self):
+        sql = " ".join(insights.build_normalized_knowledge_attempts_sql().split())
+
+        self.assertIn(
+            "ON qs.course_id IS NULL AND mc.module_id = qs.module_id",
+            sql,
+        )
+        self.assertIn(
+            "ON explicit_kp.knowledge_point_id IS NULL AND",
+            sql,
+        )
+        self.assertIn(
+            "ON explicit_kp.knowledge_point_id IS NULL AND qkp.knowledge_point_id IS NULL",
+            sql,
+        )
+        self.assertIn("SELECT DISTINCT", sql)
+
     def test_redacts_secrets_from_commands(self):
         command = "curl -H 'Authorization: Bearer top-secret' --password hunter2 --cookie session=abc http://target"
 
@@ -57,6 +117,133 @@ class TeacherLearningInsightHelpersTest(unittest.TestCase):
         self.assertEqual(timeline[0]["retryOutcome"], "recovered")
         self.assertEqual(timeline[2]["retryOutcome"], "success")
 
+    def test_timeline_uses_real_ai_question_reply_and_experiment_context(self):
+        timeline = insights.compose_learning_timeline(
+            learning_rows=[
+                {
+                    "event_id": "ai-1",
+                    "event_type": "AI_INTERACTION",
+                    "event_time": datetime(2026, 7, 24, 12, 15),
+                    "course_name": "SQL注入攻击",
+                    "payload_json": {
+                        "prompt": "如何判断当前 SQL 注入点？",
+                        "assistant_reply": "先比较正常参数与单引号输入后的响应差异。",
+                        "context": {"experimentTitle": "SQL注入基础实验"},
+                    },
+                }
+            ],
+            command_rows=[],
+            error_rows=[],
+            attempt_rows=[],
+            completion_rows=[],
+        )
+
+        self.assertEqual(timeline[0]["title"], "咨询 AI：如何判断当前 SQL 注入点？")
+        self.assertIn("SQL注入基础实验", timeline[0]["detail"])
+        self.assertIn("响应差异", timeline[0]["detail"])
+
+    def test_timeline_names_started_experiment_and_runtime_target(self):
+        timeline = insights.compose_learning_timeline(
+            learning_rows=[
+                {
+                    "event_id": "lab-1",
+                    "event_type": "LAB_START",
+                    "event_time": datetime(2026, 7, 24, 12, 14),
+                    "course_name": "SQL注入攻击",
+                    "module_name": "SQL注入基础实验",
+                    "payload_json": {
+                        "container_name": "sqli-lab-web-1",
+                        "target_url": "http://localhost:8091/index.php",
+                    },
+                }
+            ],
+            command_rows=[],
+            error_rows=[],
+            attempt_rows=[],
+            completion_rows=[],
+        )
+
+        self.assertEqual(timeline[0]["title"], "启动 SQL注入基础实验")
+        self.assertIn("sqli-lab-web-1", timeline[0]["detail"])
+        self.assertIn("localhost:8091", timeline[0]["detail"])
+
+    def test_timeline_names_ended_experiment_and_runtime_target(self):
+        timeline = insights.compose_learning_timeline(
+            learning_rows=[
+                {
+                    "event_id": "lab-stop-1",
+                    "event_type": "LAB_STOP",
+                    "event_time": datetime(2026, 7, 24, 12, 45),
+                    "course_name": "SQL注入攻击",
+                    "module_name": "SQL注入基础实验",
+                    "payload_json": {
+                        "container_name": "sqli-lab-web-1",
+                        "target_url": "http://localhost:8091/index.php",
+                    },
+                }
+            ],
+            command_rows=[],
+            error_rows=[],
+            attempt_rows=[],
+            completion_rows=[],
+        )
+
+        self.assertEqual(timeline[0]["kind"], "LAB_STOP")
+        self.assertEqual(timeline[0]["title"], "结束 SQL注入基础实验")
+        self.assertIn("sqli-lab-web-1", timeline[0]["detail"])
+
+    def test_timeline_shows_course_question_answer_and_result(self):
+        timeline = insights.compose_learning_timeline(
+            learning_rows=[
+                {
+                    "event_id": "question-1",
+                    "event_type": "QUESTION_SUBMIT",
+                    "event_time": datetime(2026, 7, 24, 12, 58),
+                    "course_name": "SQL注入攻击",
+                    "payload_json": {
+                        "answer": [1],
+                        "is_correct": True,
+                        "score": 4,
+                    },
+                    "question_snapshot_json": {
+                        "content": "以下哪种方法适合初步判断 SQL 注入？",
+                        "options": ["随机字符", "输入单引号", "JavaScript", "修改请求头"],
+                    },
+                }
+            ],
+            command_rows=[],
+            error_rows=[],
+            attempt_rows=[],
+            completion_rows=[],
+        )
+
+        self.assertEqual(timeline[0]["title"], "作答：以下哪种方法适合初步判断 SQL 注入？")
+        self.assertIn("输入单引号", timeline[0]["detail"])
+        self.assertIn("回答正确", timeline[0]["detail"])
+        self.assertIn("4 分", timeline[0]["detail"])
+
+    def test_capability_dimension_does_not_fill_missing_evidence_with_unrelated_events(self):
+        dimensions = insights.build_capability_dimensions(
+            {"troubleshooting_score": 0},
+            [
+                {
+                    "kind": "LAB_START",
+                    "status": "info",
+                    "title": "启动 SQL注入攻击实验",
+                    "occurredAt": "2026-07-24T12:14:59",
+                },
+                {
+                    "kind": "AI",
+                    "status": "info",
+                    "title": "咨询 AI：如何判断注入点",
+                    "occurredAt": "2026-07-24T12:15:41",
+                },
+            ],
+        )
+
+        troubleshooting = next(item for item in dimensions if item["key"] == "troubleshooting")
+        self.assertEqual(troubleshooting["evidence"], [])
+
     def test_dimension_evidence_maps_security_events_to_all_five_dimensions(self):
         timeline = [
             {"kind": "ATTEMPT", "status": "success", "title": "题目作答", "occurredAt": "2026-07-14T10:00:00"},
@@ -101,6 +288,29 @@ class TeacherLearningInsightHelpersTest(unittest.TestCase):
 
         self.assertEqual(result[1]["summary"], "能够根据报错调整方案，并在修复后主动复测。")
         self.assertNotIn("error_count", result[1]["summary"])
+
+    def test_dimension_summary_replaces_formula_copy_with_visible_evidence_facts(self):
+        profile = {
+            "knowledge_mastery_score": 35,
+            "profile_summary_json": {
+                "dimension_explanations": {
+                    "knowledge_mastery_score": (
+                        "知识掌握强调结果性证据，占综合分 30%。"
+                        "内部采用课程先导题 35%、实验 Flag/关键任务 40%、动态题库 25%。"
+                    )
+                }
+            },
+        }
+        timeline = [
+            {"kind": "ATTEMPT", "isCorrect": True, "status": "success"},
+            {"kind": "ATTEMPT", "isCorrect": False, "status": "failed"},
+        ]
+
+        result = insights.build_capability_dimensions(profile, timeline)
+
+        self.assertEqual(result[0]["summary"], "记录 2 次作答，其中 1 次正确。")
+        self.assertNotIn("占综合分", result[0]["summary"])
+        self.assertNotIn("内部采用", result[0]["summary"])
 
     def test_display_text_rejects_question_mark_only_legacy_data(self):
         self.assertEqual(

@@ -14,6 +14,8 @@ export interface Module {
   name: string;
   introduction: string;
   difficulty: number;
+  courseId?: number | null;
+  courseIds?: number[];
   taskPoints: TaskPoint[];
   targetMachine?: {
     id: string;

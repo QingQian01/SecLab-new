@@ -18,7 +18,7 @@ const base = {
 }
 
 describe('KnowledgeRiskPieChart', () => {
-  it('renders same-colour points and zero-error mastery as independent controls', async () => {
+  it('renders same-colour and green points as independent sectors', async () => {
     const html = await renderToString(createSSRApp(KnowledgeRiskPieChart, {
       selectedCourseId: 7,
       items: [
@@ -31,7 +31,9 @@ describe('KnowledgeRiskPieChart', () => {
     expect(html).toContain('data-risk-key="71-列数判断"')
     expect(html).toContain('data-risk-key="72-回显位判断"')
     expect(html.match(/data-tone="attention"/g)).toHaveLength(2)
-    expect(html).toContain('data-mastered-key="73-结果验证"')
+    expect(html).toContain('data-risk-key="73-结果验证"')
+    expect(html).toContain('data-tone="good"')
+    expect(html).not.toContain('data-mastered-key=')
     expect(html).not.toContain('每个知识点都是独立扇区，同色不会合并')
     expect(html).not.toContain('不绘制虚假的饼图面积')
   })

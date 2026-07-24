@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArcElement, Chart, DoughnutController, Tooltip } from 'chart.js'
 import type { KnowledgeRiskItemDto } from '../../../../api'
-import { buildKnowledgeRiskPie, classifyKnowledgeRisk, formatRiskRatePercent } from '../analysisPresentation'
+import { buildKnowledgeRiskPie, classifyKnowledgeRisk } from '../analysisPresentation'
 
 Chart.register(DoughnutController, ArcElement, Tooltip)
 
@@ -32,7 +32,7 @@ function drawChart() {
     data: {
       labels: model.value.slices.map((slice) => slice.item.knowledgePointName),
       datasets: [{
-        data: model.value.slices.map((slice) => Math.max(0, slice.item.incorrectCount)),
+        data: model.value.slices.map((slice) => slice.chartWeight),
         backgroundColor: model.value.slices.map((slice) => slice.color),
         borderColor: '#ffffff',
         borderWidth: 3,
@@ -55,7 +55,7 @@ function drawChart() {
           callbacks: {
             label: (context) => {
               const slice = model.value.slices[context.dataIndex]
-              return `${slice.item.knowledgePointName}：错误占比 ${slice.sharePercent}%，知识点错题率 ${slice.incorrectRatePercent}%`
+              return `${slice.item.knowledgePointName}：作答占比 ${slice.sharePercent}%，错题率 ${slice.incorrectRatePercent}%`
             },
           },
         },
@@ -75,7 +75,7 @@ onBeforeUnmount(() => chart?.destroy())
       <div>
         <h2>本实验知识点错误分布</h2>
       </div>
-      <div class="pie-summary"><strong>{{ model.slices.length + model.mastered.length }}</strong><span>个知识点</span><i></i><strong>{{ model.totalIncorrect }}</strong><span>次错误</span></div>
+      <div class="pie-summary"><strong>{{ model.slices.length }}</strong><span>个知识点</span><i></i><strong>{{ model.totalIncorrect }}</strong><span>次错误</span></div>
     </div>
 
     <div class="risk-legend" aria-label="知识点错题率颜色说明">
@@ -96,32 +96,17 @@ onBeforeUnmount(() => chart?.destroy())
           :data-risk-key="slice.key"
           :data-tone="slice.tone"
           :style="{ '--risk-color': slice.color }"
-          :aria-label="`${slice.item.knowledgePointName}，错误占比 ${slice.sharePercent}%，知识点错题率 ${slice.incorrectRatePercent}%，点击查看详情`"
+          :aria-label="`${slice.item.knowledgePointName}，作答占比 ${slice.sharePercent}%，错题率 ${slice.incorrectRatePercent}%，点击查看详情`"
           @click="select(slice.item)"
         >
           <i></i>
-          <span><strong>{{ slice.item.knowledgePointName }}</strong><small>{{ slice.item.incorrectStudentCount }} 人出错 · {{ slice.item.incorrectCount }} 次错误</small></span>
-          <em>{{ slice.sharePercent }}%</em>
+          <span><strong>{{ slice.item.knowledgePointName }}</strong><small>{{ slice.item.incorrectStudentCount }} 人出错 · {{ slice.item.incorrectCount }} 次错误 · {{ slice.sharePercent }}% 作答</small></span>
+          <em>{{ slice.incorrectRatePercent }}%</em>
         </button>
       </div>
     </div>
 
-    <div v-else class="all-mastered"><strong>当前实验暂未发现错误知识点</strong></div>
-
-    <section v-if="model.mastered.length" class="mastered-block">
-      <header><h3>掌握良好</h3><strong>{{ model.mastered.length }} 项</strong></header>
-      <div class="mastered-list">
-        <button
-          v-for="item in model.mastered"
-          :key="`${item.knowledgePointId}-${item.knowledgePointName}`"
-          type="button"
-          :data-mastered-key="`${item.knowledgePointId}-${item.knowledgePointName}`"
-          @click="select(item)"
-        ><span>{{ item.knowledgePointName }}</span><small>{{ item.attemptedStudentCount }} 人作答 · 错题率 {{ formatRiskRatePercent(item.incorrectRate) }}%</small></button>
-      </div>
-    </section>
-
-    <div v-if="!model.slices.length && !model.mastered.length" class="empty-inline">本实验暂无知识点数据</div>
+    <div v-else class="empty-inline">本实验暂无知识点数据</div>
   </section>
 </template>
 

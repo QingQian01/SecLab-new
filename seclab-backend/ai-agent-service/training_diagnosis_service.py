@@ -268,19 +268,6 @@ def _score_candidates(
                 approximate=False,
             )
 
-    if not candidates:
-        base_delta = 0.42 + knowledge_gap * 0.25 + dashboard_signal
-        for kp in list(catalog.values())[:5]:
-            _append_candidate(
-                candidates,
-                kp,
-                confidence_delta=base_delta,
-                module_id=None,
-                task_id=None,
-                reason="暂无明确知识点证据，基于当前画像短板选择基础知识点做近似训练",
-                approximate=True,
-            )
-
     result = []
     for item in candidates.values():
         confidence = min(0.95, round(item["confidence"], 2))

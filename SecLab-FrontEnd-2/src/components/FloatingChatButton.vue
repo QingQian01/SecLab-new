@@ -102,13 +102,9 @@ watch(currentLabContainer, (name) => {
   if (name) {
     // 靶机启动：自动打开助手窗口
     chatVisible.value = true
-    // 1 分钟后弹提示（仅当聊天窗口关闭时才弹）
+    // 1 分钟后询问学生是否需要提示，不自动发送消息
     hintTimer = setTimeout(() => {
-      if (!chatVisible.value) showHintModal.value = true
-      else {
-        // 窗口开着就直接在聊天里发提示
-        pendingHint.value = true
-      }
+      showHintModal.value = true
     }, 60_000)
   }
 })

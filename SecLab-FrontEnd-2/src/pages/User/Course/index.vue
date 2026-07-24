@@ -5,12 +5,19 @@ import {useRoute, useRouter} from "vue-router";
 import { ref, onMounted, type Ref } from 'vue'
 import { CourseStatus } from "./index";
 import type { Course } from "./index";
-import {getCourseDetail} from "../../../api.ts";
+import {getCourseModules, getTeacherCourseDetail} from "../../../api.ts";
 import { getUserInfo } from '../../../api.ts'
 
 const route = useRoute();
 const router = useRouter();
 const courseId = route.params.id;
+
+const openModuleInCourse = (moduleId: number) => {
+  router.push({
+    path: `/user/module/${moduleId}`,
+    query: { courseId: String(courseId) },
+  });
+};
 
 // 添加错误提示状态
 const errorMessage = ref<string | null>(null);
@@ -63,7 +70,7 @@ const recommendedExperiments = ref([
 // 跳转到实验模块
 const goToExperiment = (experimentId: number) => {
   console.log(`跳转到实验模块: ${experimentId}`);
-  router.push(`/user/module/${experimentId}`);
+  openModuleInCourse(experimentId);
 };
 
 onMounted( async ()=>{
@@ -274,9 +281,75 @@ onMounted( async ()=>{
   }
 })
 
+onMounted(async () => {
+  const id = Number(courseId);
+  if (!Number.isInteger(id) || id <= 0) {
+    errorMessage.value = '课程编号无效';
+    return;
+  }
+  course.value = {
+    id,
+    name: '',
+    description: null,
+    difficulty: null,
+    type: null,
+    tags: null,
+    imageUrl: null,
+    costTime: null,
+    schedule: null,
+    status: null,
+    instructor: null,
+    modules: [],
+  };
+  moduleItems.value = [];
+  try {
+    const [catalogCourse, catalogModules] = await Promise.all([
+      getTeacherCourseDetail(id),
+      getCourseModules(id),
+    ]);
+    const modules = catalogModules.map(module => ({
+      moduleId: module.id,
+      moduleName: module.name,
+      introduction: module.description,
+      type: [module.courseName || '实验'],
+      difficulty: module.difficulty,
+    }));
+    course.value = {
+      id: catalogCourse.id,
+      name: catalogCourse.name,
+      description: catalogCourse.description,
+      difficulty: catalogCourse.difficulty,
+      type: catalogCourse.category,
+      tags: null,
+      imageUrl: catalogCourse.cover || null,
+      costTime: null,
+      schedule: null,
+      status: catalogCourse.status === 'published'
+        ? CourseStatus.ACTIVE
+        : catalogCourse.status === 'archived'
+          ? CourseStatus.COMPLETED
+          : CourseStatus.UPCOMING,
+      instructor: null,
+      modules,
+    };
+    moduleItems.value = modules.map(module => ({
+      id: module.moduleId,
+      name: module.moduleName,
+      description: module.introduction,
+      difficulty: module.difficulty,
+      type: module.type.join(', '),
+    }));
+    errorMessage.value = null;
+  } catch (error) {
+    course.value.modules = [];
+    moduleItems.value = [];
+    errorMessage.value = error instanceof Error ? error.message : '课程详情加载失败';
+  }
+})
+
 // 选择模块时的跳转处理
 const handleSelectModule = (moduleId: number) => {
-  router.push(`/user/module/${moduleId}`);
+  openModuleInCourse(moduleId);
 };
 
 // 获取课程状态对应的标签样式
@@ -326,7 +399,7 @@ const isContentVisible = ref(false)
 
 function onButtonClick(id:number | null){
   if (id === null) return;
-  router.push(`/user/module/${id}`);
+  openModuleInCourse(id);
 }
 
 onMounted(() => {
@@ -401,7 +474,7 @@ const getRecommendedExperiments = (courseId: number | null) => {
 // 开始实验
 const startExperiment = (experimentId: number) => {
   console.log(`开始实验: ${experimentId}`);
-  router.push(`/user/module/${experimentId}`);
+  openModuleInCourse(experimentId);
 };
 
 // 获取视频标题

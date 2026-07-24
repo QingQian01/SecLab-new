@@ -30,6 +30,7 @@ const issueOpen = ref(false)
 let mounted = false
 
 const approvedCount = computed(() => data.value?.exercises.filter((item) => item.reviewStatus === 'APPROVED').length || 0)
+const visibleError = computed(() => error.value || data.value?.lastErrorMessage || '')
 
 async function load() {
   loading.value = true
@@ -79,7 +80,7 @@ onMounted(() => {
 <template>
   <section class="ai-panel">
     <header class="ai-head"><h3>AI 分析与教师备课建议</h3><button type="button" :disabled="analysing" @click="analyse">{{ analysing ? 'AI 分析中…' : data?.analysis ? '重新分析' : '开始 AI 分析' }}</button></header>
-    <div v-if="error" class="ai-error">{{ error }}</div>
+    <div v-if="visibleError" class="ai-error">{{ visibleError }}</div>
     <div v-if="loading && !data" class="ai-state">正在读取分析记录…</div>
     <div v-else-if="!data?.analysis" class="ai-empty"><strong>暂无本知识点 AI 分析</strong></div>
     <template v-else>

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS question_submission (
     question_type VARCHAR(64) NOT NULL,
     answer_json JSON NOT NULL,
     standard_answer_json JSON NULL,
+    question_snapshot_json JSON NULL,
     is_correct TINYINT(1) NULL,
     score DECIMAL(8,2) NOT NULL DEFAULT 0,
     cost_time INT NULL,
@@ -83,6 +84,10 @@ def _ensure_question_submission_columns(cursor) -> None:
         (
             "knowledge_point_id",
             "ALTER TABLE question_submission ADD COLUMN knowledge_point_id BIGINT NULL AFTER training_session_id",
+        ),
+        (
+            "question_snapshot_json",
+            "ALTER TABLE question_submission ADD COLUMN question_snapshot_json JSON NULL AFTER standard_answer_json",
         ),
     ]
     for column_name, sql in additions:
@@ -270,6 +275,7 @@ def save_question_submission(data: dict[str, Any]) -> dict[str, Any]:
         "question_type": question_type,
         "answer_json": answer_json,
         "standard_answer_json": standard_answer_json,
+        "question_snapshot_json": _json_dumps(data.get("question_snapshot")) if isinstance(data.get("question_snapshot"), dict) else None,
         "is_correct": None if result["is_correct"] is None else (1 if result["is_correct"] else 0),
         "score": result["score"],
         "cost_time": _to_int(data.get("cost_time")),
@@ -308,13 +314,13 @@ def save_question_submission(data: dict[str, Any]) -> dict[str, Any]:
                 INSERT INTO question_submission (
                     submission_id, user_id, class_id, course_id, module_id,
                     task_id, question_id, question_uid, question_type, answer_json,
-                    standard_answer_json, is_correct, score, cost_time,
+                    standard_answer_json, question_snapshot_json, is_correct, score, cost_time,
                     question_source, training_session_id, knowledge_point_id, request_id
                 ) VALUES (
                     %(submission_id)s, %(user_id)s, %(class_id)s, %(course_id)s,
                     %(module_id)s, %(task_id)s, %(question_id)s, %(question_uid)s,
                     %(question_type)s, %(answer_json)s, %(standard_answer_json)s,
-                    %(is_correct)s, %(score)s, %(cost_time)s, %(question_source)s,
+                    %(question_snapshot_json)s, %(is_correct)s, %(score)s, %(cost_time)s, %(question_source)s,
                     %(training_session_id)s, %(knowledge_point_id)s, %(request_id)s
                 )
                 """,

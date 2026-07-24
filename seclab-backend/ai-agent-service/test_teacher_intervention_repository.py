@@ -6,6 +6,12 @@ import teacher_intervention_repository as interventions
 
 
 class TeacherInterventionHelpersTest(unittest.TestCase):
+    def test_runtime_schema_upgrade_uses_mysql_compatible_column_guard(self):
+        self.assertFalse(any(
+            "ADD COLUMN IF NOT EXISTS" in statement.upper()
+            for statement in interventions.SCHEMA_STATEMENTS
+        ))
+
     def test_student_assignment_summary_exposes_experiment_questions_deadline_and_result(self):
         row = {
             "assignment_status": "COMPLETED",

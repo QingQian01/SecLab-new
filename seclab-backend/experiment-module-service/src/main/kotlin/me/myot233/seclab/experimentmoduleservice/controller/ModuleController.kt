@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -28,6 +29,13 @@ class ModuleController(
     @PostMapping("/modules")
     fun listModulesByPost(): ApiResponse<List<ModuleOverviewDto>> =
         ApiResponse.success(catalogQueryService.listModules())
+
+    @GetMapping("/{id}")
+    fun getModule(
+        @PathVariable id: Int,
+        @RequestParam(required = false) courseId: Int?,
+    ): ApiResponse<ModuleOverviewDto> =
+        ApiResponse.success(catalogQueryService.getModule(id, courseId))
 
     @PostMapping
     fun createModule(

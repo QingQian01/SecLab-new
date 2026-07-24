@@ -93,7 +93,6 @@ SCHEMA_STATEMENTS = (
       KEY idx_intervention_teacher_time (teacher_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
-    "ALTER TABLE teacher_intervention ADD COLUMN IF NOT EXISTS course_id INT NULL AFTER teaching_class_id",
     """
     CREATE TABLE IF NOT EXISTS teacher_intervention_student (
       intervention_id BIGINT NOT NULL,
@@ -139,6 +138,25 @@ SCHEMA_STATEMENTS = (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
 )
+
+
+def _ensure_course_id_column(cursor) -> None:
+    cursor.execute(
+        """
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = %s
+          AND COLUMN_NAME = %s
+        LIMIT 1
+        """,
+        ("teacher_intervention", "course_id"),
+    )
+    if cursor.fetchone() is None:
+        cursor.execute(
+            "ALTER TABLE teacher_intervention "
+            "ADD COLUMN course_id INT NULL AFTER teaching_class_id"
+        )
 
 
 def _json_dumps(value: Any) -> str:
@@ -259,6 +277,7 @@ def ensure_intervention_schema() -> None:
         with conn.cursor() as cursor:
             for statement in SCHEMA_STATEMENTS:
                 cursor.execute(statement)
+            _ensure_course_id_column(cursor)
         conn.commit()
 
 

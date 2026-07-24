@@ -11,10 +11,14 @@ import me.myot233.seclab.userservice.dto.RegisterRequest
 import me.myot233.seclab.userservice.dto.UserProfileResponse
 import me.myot233.seclab.userservice.dto.UserUpdateRequest
 import me.myot233.seclab.userservice.entity.SchoolClassEntity
+import me.myot233.seclab.userservice.entity.TeachingClassStatus
+import me.myot233.seclab.userservice.entity.TeachingClassStudentEntity
 import me.myot233.seclab.userservice.entity.UserEntity
 import me.myot233.seclab.userservice.entity.UserRole
 import me.myot233.seclab.userservice.exception.ApiException
 import me.myot233.seclab.userservice.repository.SchoolClassRepository
+import me.myot233.seclab.userservice.repository.TeachingClassRepository
+import me.myot233.seclab.userservice.repository.TeachingClassStudentRepository
 import me.myot233.seclab.userservice.repository.UserRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -27,6 +31,8 @@ import java.time.format.DateTimeFormatter
 class UserService(
     private val userRepository: UserRepository,
     private val classRepository: SchoolClassRepository,
+    private val teachingClassRepository: TeachingClassRepository,
+    private val teachingClassStudentRepository: TeachingClassStudentRepository,
     private val passwordService: PasswordService,
     private val jwtTokenService: JwtTokenService,
 ) {
@@ -86,8 +92,38 @@ class UserService(
             userRole = UserRole.STUDENT,
             isDeleted = 0,
         )
-        userRepository.save(user)
+        val saved = userRepository.save(user)
+        joinMatchingTeachingClasses(saved)
     }
+
+    private fun joinMatchingTeachingClasses(user: UserEntity) {
+        val studentId = user.userId ?: return
+        val administrativeClass = user.classInfo?.className?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        teachingClassRepository
+            .findAllByStatus(TeachingClassStatus.ACTIVE)
+            .filter { canonicalClassName(it.className) == canonicalClassName(administrativeClass) }
+            .filter { it.teachingClassId != null }
+            .forEach { teachingClass ->
+                val teachingClassId = teachingClass.teachingClassId ?: return@forEach
+                if (!teachingClassStudentRepository.existsByTeachingClassIdAndStudentId(teachingClassId, studentId)) {
+                    teachingClassStudentRepository.save(
+                        TeachingClassStudentEntity(
+                            teachingClassId = teachingClassId,
+                            studentId = studentId,
+                            source = "MANUAL",
+                        ),
+                    )
+                }
+            }
+    }
+
+    private fun canonicalClassName(value: String): String =
+        value
+            .trim()
+            .lowercase()
+            .replace(Regex("\\s+"), "")
+            .replace("网络安全", "网安")
+            .removeSuffix("班")
 
     @Transactional(readOnly = true)
     fun getProfile(token: String?): UserProfileResponse {

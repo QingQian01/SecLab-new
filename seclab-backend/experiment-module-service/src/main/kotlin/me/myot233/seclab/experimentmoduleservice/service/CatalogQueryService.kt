@@ -34,8 +34,22 @@ class CatalogQueryService(
             .sortedBy { it.moduleId }
             .map { module ->
                 val courseIds = courseIdsByModule[module.moduleId].orEmpty()
-                toModuleOverviewDto(module, courseIds.firstOrNull(), courseIds)
+                toModuleOverviewDto(module, courseIds.singleOrNull(), courseIds)
             }
+    }
+
+    fun getModule(id: Int, requestedCourseId: Int? = null): ModuleOverviewDto {
+        val module = moduleRepository.findById(id)
+            .orElseThrow { NoSuchElementException("实验不存在: $id") }
+        val courseIds = loadCourseIdsByModule()[id].orEmpty()
+        if (requestedCourseId != null && requestedCourseId !in courseIds) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "实验不属于所选课程")
+        }
+        return toModuleOverviewDto(
+            module,
+            requestedCourseId ?: courseIds.singleOrNull(),
+            courseIds,
+        )
     }
 
     fun getCourse(id: Int): CourseSummaryDto =

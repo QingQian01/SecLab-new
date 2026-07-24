@@ -25,6 +25,27 @@ function pieRisk(overrides: Record<string, unknown> = {}) {
 }
 
 describe('teaching analysis presentation', () => {
+  it('keeps the experiment summary factual and removes canned teaching copy', () => {
+    const panelSource = readFileSync(
+      new URL('../components/CourseAnalysisPanel.vue', import.meta.url),
+      'utf8',
+    )
+
+    for (const phrase of ['更新分析', '答题情况', '仍有', '名学生']) {
+      expect(panelSource).toContain(phrase)
+    }
+    for (const phrase of [
+      '教学动作',
+      '建议下一步',
+      '重点关注',
+      'teacherAction',
+      'teachingSuggestions',
+      'overallComment',
+    ]) {
+      expect(panelSource).not.toContain(phrase)
+    }
+  })
+
   it('uses pie-chart and experiment wording throughout the teacher page', () => {
     const pageSource = readFileSync(new URL('../index.vue', import.meta.url), 'utf8')
     const pieSource = readFileSync(new URL('../components/KnowledgeRiskPieChart.vue', import.meta.url), 'utf8')
@@ -88,6 +109,8 @@ describe('teaching analysis presentation', () => {
     expect(getTimelineEventPresentation('COMMAND', 'failed').label).toBe('命令执行失败')
     expect(getTimelineEventPresentation('COMMAND', 'recovered').label).toBe('重试后成功')
     expect(getTimelineEventPresentation('HINT').label).toBe('请求提示')
+    expect(getTimelineEventPresentation('LAB_START').label).toBe('实验启动')
+    expect(getTimelineEventPresentation('LAB_STOP').label).toBe('实验结束')
   })
 
   it('never presents a negative evidence count', () => {
@@ -133,11 +156,11 @@ describe('teaching analysis presentation', () => {
     expect(result.slices).toHaveLength(2)
     expect(result.slices.map((item) => item.key)).toEqual(['1-列数判断', '2-回显位判断'])
     expect(result.slices.map((item) => item.tone)).toEqual(['attention', 'attention'])
-    expect(result.slices.map((item) => item.sharePercent)).toEqual([40, 60])
+    expect(result.slices.map((item) => item.sharePercent)).toEqual([44, 56])
     expect(result.slices.reduce((total, item) => total + item.sharePercent, 0)).toBe(100)
   })
 
-  it('scopes pie data to the selected experiment and separates zero-error mastery', () => {
+  it('keeps zero-error knowledge points as real green sectors', () => {
     const result = buildKnowledgeRiskPie([
       pieRisk({ knowledgePointId: 1, incorrectCount: 2 }),
       pieRisk({ knowledgePointId: 2, incorrectCount: 0, incorrectRate: 0 }),
@@ -145,8 +168,9 @@ describe('teaching analysis presentation', () => {
     ], 7)
 
     expect(result.totalIncorrect).toBe(2)
-    expect(result.slices.map((item) => item.item.knowledgePointId)).toEqual([1])
-    expect(result.mastered.map((item) => item.knowledgePointId)).toEqual([2])
+    expect(result.slices.map((item) => item.item.knowledgePointId)).toEqual([1, 2])
+    expect(result.slices.map((item) => item.tone)).toEqual(['attention', 'good'])
+    expect(result.slices.map((item) => item.chartWeight)).toEqual([8, 8])
   })
 
   it('uses red orange yellow and green thresholds from each point error rate', () => {

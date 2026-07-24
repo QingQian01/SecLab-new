@@ -103,9 +103,28 @@ def _completed_courses(cursor, user_id: int) -> int:
     row = _fetch_one(
         cursor,
         """
-        SELECT COUNT(*) AS total
-        FROM lab_session
-        WHERE user_id = %(user_id)s AND status = 'completed'
+        SELECT COUNT(DISTINCT experiment_key) AS total
+        FROM (
+            SELECT CASE
+                     WHEN module_id IS NOT NULL THEN CONCAT('module:', module_id)
+                     ELSE CONCAT('course:', course_id)
+                   END AS experiment_key
+            FROM challenge_completion_event
+            WHERE user_id = %(user_id)s
+              AND LOWER(completion_status) = 'completed'
+              AND (module_id IS NOT NULL OR course_id IS NOT NULL)
+
+            UNION ALL
+
+            SELECT CASE
+                     WHEN module_id IS NOT NULL THEN CONCAT('module:', module_id)
+                     ELSE CONCAT('course:', course_id)
+                   END AS experiment_key
+            FROM lab_session
+            WHERE user_id = %(user_id)s
+              AND LOWER(status) = 'completed'
+              AND (module_id IS NOT NULL OR course_id IS NOT NULL)
+        ) completed_experiments
         """,
         {"user_id": user_id},
     )
@@ -261,6 +280,10 @@ def _evaluation(profile: dict[str, Any], skills: list[dict[str, Any]]) -> str:
 
 def _learning_profile(profile: dict[str, Any]) -> dict[str, Any]:
     if not profile:
+        return dict(DEFAULT_DASHBOARD["learningProfile"])
+    summary = _json_loads(profile.get("profile_summary_json"))
+    evidence = summary.get("evidence")
+    if isinstance(evidence, dict) and not any(_to_float(value) > 0 for value in evidence.values()):
         return dict(DEFAULT_DASHBOARD["learningProfile"])
     skills = _dimension_scores(profile)
     return {

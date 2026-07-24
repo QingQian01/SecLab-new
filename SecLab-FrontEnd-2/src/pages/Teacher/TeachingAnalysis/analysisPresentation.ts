@@ -48,7 +48,8 @@ export function getTimelineEventPresentation(
   if (type === 'AI') return { label: 'AI 协作', tone: 'info' }
   if (type === 'ATTEMPT') return { label: '提交作答', tone: normalizedOutcome === 'success' ? 'success' : 'warning' }
   if (type === 'SUCCESS') return { label: '实验验证成功', tone: 'success' }
-  if (type === 'LAB_START') return { label: '开始安全实验', tone: 'info' }
+  if (type === 'LAB_START') return { label: '实验启动', tone: 'info' }
+  if (type === 'LAB_STOP') return { label: '实验结束', tone: 'neutral' }
   return { label: '学习事件', tone: 'neutral' }
 }
 
@@ -108,6 +109,7 @@ export interface KnowledgeRiskPieSlice<T extends RiskPieItemLike> {
   key: string
   item: T
   sharePercent: number
+  chartWeight: number
   incorrectRatePercent: number
   tone: KnowledgeRiskTone
   color: string
@@ -126,29 +128,35 @@ function allocateWholePercentages(values: number[], total: number): number[] {
 }
 
 export function buildKnowledgeRiskPie<T extends RiskPieItemLike>(items: T[], selectedCourseId: number) {
-  const scoped = items.filter((item) => Number(item.courseId) === Number(selectedCourseId))
-  const mastered = scoped.filter((item) => Math.max(0, Number(item.incorrectCount) || 0) === 0)
-  const withErrors = scoped.filter((item) => Math.max(0, Number(item.incorrectCount) || 0) > 0)
-  const totalIncorrect = withErrors.reduce(
+  const scoped = items.filter(
+    (item) => Number(item.courseId) === Number(selectedCourseId)
+      && Math.max(0, Number(item.attemptedCount) || 0) > 0,
+  )
+  const totalIncorrect = scoped.reduce(
     (total, item) => total + Math.max(0, Number(item.incorrectCount) || 0),
     0,
   )
-  const shares = allocateWholePercentages(
-    withErrors.map((item) => Math.max(0, Number(item.incorrectCount) || 0)),
-    totalIncorrect,
+  const totalAttempts = scoped.reduce(
+    (total, item) => total + Math.max(0, Number(item.attemptedCount) || 0),
+    0,
   )
-  const slices: KnowledgeRiskPieSlice<T>[] = withErrors.map((item, index) => {
+  const shares = allocateWholePercentages(
+    scoped.map((item) => Math.max(0, Number(item.attemptedCount) || 0)),
+    totalAttempts,
+  )
+  const slices: KnowledgeRiskPieSlice<T>[] = scoped.map((item, index) => {
     const presentation = classifyKnowledgeRisk(item.incorrectRate)
     return {
       key: `${item.knowledgePointId ?? 'name'}-${item.knowledgePointName}`,
       item,
       sharePercent: shares[index],
+      chartWeight: Math.max(0, Number(item.attemptedCount) || 0),
       incorrectRatePercent: formatRiskRatePercent(item.incorrectRate),
       tone: presentation.tone,
       color: presentation.color,
     }
   })
-  return { slices, mastered, totalIncorrect }
+  return { slices, totalIncorrect, totalAttempts }
 }
 
 export function formatRiskRatePercent(value?: number | null): number {

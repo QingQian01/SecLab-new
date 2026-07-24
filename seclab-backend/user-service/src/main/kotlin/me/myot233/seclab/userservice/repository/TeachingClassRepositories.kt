@@ -5,6 +5,7 @@ import me.myot233.seclab.userservice.entity.TeachingClassEntity
 import me.myot233.seclab.userservice.entity.TeachingClassImportBatchEntity
 import me.myot233.seclab.userservice.entity.TeachingClassStudentEntity
 import me.myot233.seclab.userservice.entity.TeachingClassStudentId
+import me.myot233.seclab.userservice.entity.TeachingClassStatus
 import org.springframework.data.jpa.repository.EntityGraph
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
@@ -24,6 +25,13 @@ interface TeachingClassRepository : JpaRepository<TeachingClassEntity, Long> {
 
     @EntityGraph(attributePaths = ["teacher"])
     fun findAllByTeacherIdOrderByUpdatedAtDesc(teacherId: Long): List<TeachingClassEntity>
+
+    fun findAllByClassNameIgnoreCaseAndStatus(
+        className: String,
+        status: TeachingClassStatus,
+    ): List<TeachingClassEntity>
+
+    fun findAllByStatus(status: TeachingClassStatus): List<TeachingClassEntity>
 
     fun existsByTeacherIdAndAcademicYearAndSemesterAndClassNameIgnoreCase(
         teacherId: Long,

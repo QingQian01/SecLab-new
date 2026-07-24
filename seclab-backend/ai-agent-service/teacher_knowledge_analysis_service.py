@@ -481,16 +481,175 @@ def _validate_result(payload: Any) -> dict[str, Any]:
     return {**payload, "exercises": normalized}
 
 
+def _text(value: Any, default: str = "") -> str:
+    normalized = str(value or "").strip()
+    return normalized or default
+
+
+def _is_explanatory_answer(value: Any) -> bool:
+    answer = _text(value)
+    if len(answer) < 10:
+        return False
+    try:
+        parsed = json.loads(answer)
+    except (TypeError, ValueError):
+        return True
+    return isinstance(parsed, str) and len(parsed.strip()) >= 10
+
+
+def _build_evidence_result(evidence: dict[str, Any]) -> dict[str, Any]:
+    knowledge_name = _text(evidence.get("knowledgePointName"), "当前知识点")
+    attempted_count = int(evidence.get("attemptedCount") or 0)
+    incorrect_count = int(evidence.get("incorrectCount") or 0)
+    incorrect_rate = evidence.get("incorrectRate")
+    if incorrect_rate is None:
+        incorrect_rate = incorrect_count / attempted_count if attempted_count else 0
+    percent = round(float(incorrect_rate) * 100, 1)
+
+    raw_mistakes = [
+        item for item in (evidence.get("commonMistakes") or [])
+        if isinstance(item, dict) and _text(item.get("answer"))
+    ]
+    common_mistakes = [
+        {
+            "title": f"高频错误作答 {index + 1}",
+            "reason": (
+                f"作答“{_text(item.get('answer'))}”出现 {int(item.get('count') or 0)} 次，"
+                f"涉及 {int(item.get('studentCount') or 0)} 名学生。"
+            ),
+            "answer": _text(item.get("answer")),
+            "count": int(item.get("count") or 0),
+            "studentCount": int(item.get("studentCount") or 0),
+        }
+        for index, item in enumerate(raw_mistakes[:3])
+    ]
+    if not common_mistakes:
+        common_mistakes = [{
+            "title": "未形成集中错误",
+            "reason": f"当前记录的 {attempted_count} 次作答中有 {incorrect_count} 次错误。",
+            "answer": "",
+            "count": incorrect_count,
+            "studentCount": int(evidence.get("incorrectStudentCount") or 0),
+        }]
+
+    attempts = [
+        item for item in (evidence.get("representativeAttempts") or [])
+        if isinstance(item, dict)
+    ]
+    reference = next(
+        (item for item in attempts if _is_explanatory_answer(item.get("standardAnswer"))),
+        None,
+    ) or next(
+        (item for item in attempts if _text(item.get("standardAnswer"))),
+        {},
+    )
+    reference_title = _text(reference.get("title"), knowledge_name)
+    standard_answer = _text(
+        reference.get("standardAnswer"),
+        f"答案需准确说明“{knowledge_name}”的关键判断步骤，并给出与实验要求一致的依据。",
+    )
+    common_answer = _text(raw_mistakes[0].get("answer")) if raw_mistakes else ""
+    mistake_action = (
+        f"先展示高频错误作答“{common_answer}”，再与标准答案逐项对照。"
+        if common_answer else
+        "选取本次作答记录与标准答案逐项对照。"
+    )
+
+    exercises = [
+        {
+            "role": "FOUNDATION",
+            "questionType": "short_answer",
+            "stem": f"请完成“{reference_title}”，写出关键判断步骤。",
+            "options": [],
+            "standardAnswer": standard_answer,
+            "explanation": f"依据本次“{knowledge_name}”作答记录中的标准答案进行核对。",
+            "difficulty": 1,
+            "generationRationale": "复查本次错误记录对应的基础步骤。",
+        },
+        {
+            "role": "CONSOLIDATION",
+            "questionType": "short_answer",
+            "stem": (
+                f"有同学在“{knowledge_name}”中作答“{common_answer}”。"
+                "请指出问题并写出正确答案。"
+                if common_answer else
+                f"请复核“{knowledge_name}”的作答过程，写出正确答案及判断依据。"
+            ),
+            "options": [],
+            "standardAnswer": standard_answer,
+            "explanation": mistake_action,
+            "difficulty": 2,
+            "generationRationale": "针对本次高频错误进行辨析。",
+        },
+        {
+            "role": "TRANSFER",
+            "questionType": "short_answer",
+            "stem": f"实验条件变化后，如何继续验证“{knowledge_name}”？请写出步骤与判断依据。",
+            "options": [],
+            "standardAnswer": standard_answer,
+            "explanation": "按标准答案检查步骤、顺序和判断依据是否完整。",
+            "difficulty": 3,
+            "generationRationale": "检验能否在变化条件下复用本知识点的判断方法。",
+        },
+    ]
+    return {
+        "overallConclusion": (
+            f"“{knowledge_name}”共有 {attempted_count} 次作答，其中 {incorrect_count} 次错误，"
+            f"错误率 {percent:g}%。"
+        ),
+        "commonMistakes": common_mistakes,
+        "teachingAdvice": [
+            {
+                "title": "对照讲评",
+                "action": mistake_action,
+            },
+            {
+                "title": "当堂复练",
+                "action": "讲评后完成基础题与巩固题，重点检查步骤和判断依据。",
+            },
+        ],
+        "exercises": exercises,
+    }
+
+
 class KnowledgeAnalysisService:
     def __init__(
         self,
         repository: KnowledgeAnalysisRepository,
         evidence_loader: Callable[[int, int, int, int], dict[str, Any]],
         provider: Callable[[str, str], Awaitable[dict[str, Any]]],
+        timeout_seconds: float = 45,
+        max_attempts: int = 2,
     ):
         self.repository = repository
         self.evidence_loader = evidence_loader
         self.provider = provider
+        self.timeout_seconds = max(0.1, float(timeout_seconds))
+        self.max_attempts = max(1, int(max_attempts))
+
+    async def _request_provider(self, prompt: str, user_key: str) -> dict[str, Any]:
+        last_error: Optional[ProviderUnavailableError] = None
+        for attempt in range(self.max_attempts):
+            try:
+                return await asyncio.wait_for(
+                    self.provider(prompt, user_key),
+                    timeout=self.timeout_seconds,
+                )
+            except TimeoutError as exc:
+                detail = str(exc).strip()
+                message = f"AI 分析请求超时：{detail}" if detail else "AI 分析请求超时，请稍后重试"
+                last_error = ProviderUnavailableError(message)
+                last_error.__cause__ = exc
+            except ValueError as exc:
+                message = str(exc).strip() or "AI 返回内容不是有效结构化结果"
+                raise ProviderUnavailableError(message) from exc
+            except Exception as exc:
+                message = str(exc).strip() or "AI 分析服务暂不可用，请稍后重试"
+                last_error = ProviderUnavailableError(message)
+                last_error.__cause__ = exc
+            if attempt + 1 < self.max_attempts:
+                await asyncio.sleep(0)
+        raise last_error or ProviderUnavailableError("AI 分析服务暂不可用，请稍后重试")
 
     def get_analysis(self, teacher_id: int, class_id: int, course_id: int, knowledge_point_id: int):
         return self.repository.get(teacher_id, class_id, course_id, knowledge_point_id)
@@ -499,6 +658,7 @@ class KnowledgeAnalysisService:
         evidence = self.evidence_loader(teacher_id, class_id, course_id, knowledge_point_id)
         if int(evidence.get("attemptedCount") or 0) <= 0:
             raise ValueError("当前知识点暂无可分析的有效作答")
+        previous = self.repository.get(teacher_id, class_id, course_id, knowledge_point_id)
         self.repository.begin(teacher_id, class_id, course_id, knowledge_point_id)
         prompt = (
             "你是网络安全实验课教师助理。只能根据给定知识点证据返回JSON。"
@@ -508,16 +668,25 @@ class KnowledgeAnalysisService:
             "不得编造学生姓名、人数或证据。证据：" + _dumps(evidence)
         )
         try:
-            raw = await asyncio.wait_for(
-                self.provider(prompt, f"knowledge-{class_id}-{course_id}-{knowledge_point_id}"),
-                timeout=20,
+            raw = await self._request_provider(
+                prompt,
+                f"knowledge-{class_id}-{course_id}-{knowledge_point_id}",
             )
             result = _validate_result(raw)
         except AnalysisAlreadyRunningError:
             raise
         except Exception as exc:
-            self.repository.save_failure(teacher_id, class_id, course_id, knowledge_point_id, str(exc))
-            raise ProviderUnavailableError(str(exc)) from exc
+            if previous.get("analysis"):
+                message = str(exc).strip() or "AI 分析服务暂不可用，请稍后重试"
+                self.repository.save_failure(
+                    teacher_id,
+                    class_id,
+                    course_id,
+                    knowledge_point_id,
+                    message,
+                )
+                return self.get_analysis(teacher_id, class_id, course_id, knowledge_point_id)
+            result = _validate_result(_build_evidence_result(evidence))
         analysis = {key: result[key] for key in ("overallConclusion", "commonMistakes", "teachingAdvice")}
         self.repository.save_success(
             teacher_id, class_id, course_id, knowledge_point_id,
@@ -539,12 +708,12 @@ class KnowledgeAnalysisService:
             "不得改变role。原题：" + _dumps(current)
         )
         try:
-            raw = await asyncio.wait_for(
-                self.provider(prompt, f"knowledge-exercise-{exercise_id}"),
-                timeout=20,
-            )
+            raw = await self._request_provider(prompt, f"knowledge-exercise-{exercise_id}")
         except Exception as exc:
-            raise ProviderUnavailableError(str(exc)) from exc
+            message = str(exc).strip() or "AI 分析服务暂不可用，请稍后重试"
+            if isinstance(exc, ProviderUnavailableError):
+                raise
+            raise ProviderUnavailableError(message) from exc
         item = raw.get("exercise") if isinstance(raw, dict) and isinstance(raw.get("exercise"), dict) else raw
         if not isinstance(item, dict) or not item.get("stem") or not item.get("standardAnswer"):
             raise ProviderUnavailableError("AI 未返回完整例题")

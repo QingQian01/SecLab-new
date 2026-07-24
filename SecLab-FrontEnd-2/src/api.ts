@@ -2942,66 +2942,33 @@ function getFallbackCourseDetail(id: number): Result<Course> {
     };
 }
 
-export async function getModuleDetail(id:number): Promise<Result<Module>> {
-    try {
-        const response = await axios.get(`${BASE_URL}/course/module/detail?id=${id}`);
-        if (response.status === 200) {
-            return response.data;
-        } else {
-            console.error(`Unexpected response status: ${response.status}`);
-            return getFallbackModuleDetail(id);
-        }
-    } catch (error) {
-        console.error('Error fetching module detail:', error);
-        return getFallbackModuleDetail(id);
+export async function getModuleDetail(id: number, courseId?: number): Promise<Result<Module>> {
+    const response = await axios.get(
+        `${EXPERIMENT_MODULE_BASE_URL}/stu/module/${id}`,
+        courseId ? { params: { courseId } } : undefined,
+    );
+    const persisted = response.data?.data;
+    if (response.status !== 200 || !persisted) {
+        throw new Error(response.data?.message || '实验详情不存在');
     }
-}   
 
-// 提供硬编码的备用模块数据
-function getFallbackModuleDetail(id: number): Result<Module> {
-    // 尝试从我们的备用数据中查找对应ID的实验
-    const experiment = findExperimentById(Number(id));
-    
-    if (experiment) {
-        // 确保experiment的结构符合Module接口
-        const moduleData = {
-            id: experiment.id,
-            name: experiment.name,
-            introduction: experiment.introduction,
-            difficulty: experiment.difficulty,
-            taskPoints: experiment.taskPoints.map(task => ({
+    const authored = findExperimentById(Number(id));
+    return {
+        ...response.data,
+        isSuccess: 1,
+        status: 200,
+        data: {
+            id: persisted.id,
+            name: persisted.name,
+            introduction: persisted.description || '',
+            difficulty: persisted.difficulty,
+            courseId: persisted.courseId ?? null,
+            courseIds: persisted.courseIds || [],
+            taskPoints: (authored?.taskPoints || []).map(task => ({
                 ...task,
-                questions: task.questions || []
+                questions: task.questions || [],
             })),
-            targetMachine: experiment.targetMachine
-        };
-        
-        return {
-            isSuccess: 1,
-            status: 200,
-            message: "success",
-            data: moduleData as any
-        };
-    } else {
-        // 如果找不到对应ID的实验，返回默认的SQL注入实验（ID为1）
-        const defaultExperiment = findExperimentById(1);
-        const moduleData = {
-            id: id, // 使用请求的ID
-            name: defaultExperiment?.name || "SQL注入基础实验",
-            introduction: defaultExperiment?.introduction || "SQL注入基础实验介绍",
-            difficulty: defaultExperiment?.difficulty || 3,
-            taskPoints: (defaultExperiment?.taskPoints || []).map(task => ({
-                ...task,
-                questions: task.questions || []
-            })),
-            targetMachine: defaultExperiment?.targetMachine || { id: "default-machine" }
-        };
-        
-        return {
-            isSuccess: 1,
-            status: 200,
-            message: "success",
-            data: moduleData as any
-        };
-    }
+            targetMachine: authored?.targetMachine,
+        } as Module,
+    };
 }
