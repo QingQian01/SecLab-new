@@ -119,7 +119,18 @@ cd SecLab-FrontEnd-2
 Remove-Item -Recurse -Force node_modules
 Remove-Item -Force package-lock.json
 npm install
+
+# 复制前端服务地址模板
+Copy-Item .env.example .env
 ```
+
+前端 `.env` 应包含以下服务地址：
+
+- `VITE_API_BASE_URL`：用户服务，默认 `http://localhost:8083`
+- `VITE_EXPERIMENT_MODULE_BASE_URL`：实验模块服务，默认 `http://localhost:8084`
+- `VITE_IMAGE_SERVICE_BASE_URL`：图片服务，默认 `http://localhost:8086/api/images`
+- `VITE_DOCKER_API_URL`：Docker API，默认 `http://localhost:3000`
+- `VITE_AGENT_BASE_URL`：AI Agent，默认 `http://localhost:8010`
 
 #### 4.3.2 修复依赖问题
 
@@ -159,7 +170,12 @@ Copy-Item .env.example .env
 
 # 编辑 .env 文件，根据需要修改配置（特别是 DIFY_API_KEY）
 notepad .env
+
+# 启动前检查必填项、占位符和变量格式；检查结果不会输出密钥值
+python runtime_config_validator.py .env
 ```
+
+检查器返回 `[OK]` 后再启动服务。若返回 `[ERROR]`，按提示补齐对应变量名；不要把真实 `.env` 提交到 Git。
 
 #### 4.4.2 安装 Python 依赖
 
@@ -217,6 +233,7 @@ cd D:\SecLab\SecLab\seclab-backend
 - 本地访问：<http://localhost:8010>
 - API 文档：<http://localhost:8010/docs>
 - 健康检查：<http://localhost:8010/health>
+- Dify 连接检查：<http://localhost:8010/health/ai-analysis>
 
 ### 4.5 cpolar 内网穿透部署
 
