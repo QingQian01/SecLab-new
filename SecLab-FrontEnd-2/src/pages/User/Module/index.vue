@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import MarkdownRenderer from "../../../components/MarkdownRenderer.vue";
+import VNCViewer from "../../../components/VNCViewer.vue";
 import type { DisplayQuestionType } from '../../../types/Question';
-import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import type {Experiment} from "../../../types/experiment.ts";
 import type { Module } from './index.ts';
 import { convertExperimentToModule } from './index.ts';
@@ -86,9 +87,22 @@ const getBaseLabId = () => {
   return currentId >= 100 ? Math.floor(currentId / 100) : currentId
 }
 
+// 靶机环境尚未部署的实验：靶机页签只显示「建设中」占位，不启动任何靶机，
+// 避免未映射 id 落到默认 SQL 靶机。（目前为空，栈溢出已接入真实靶机，见下方 PWN_TARGETS）
+const TARGET_PENDING_MODULE_IDS: number[] = []
+const isTargetPending = computed(() =>
+  TARGET_PENDING_MODULE_IDS.includes(Number(experiment.value.id) || Number(route.params.id))
+)
+
+// TCP pwn 靶机（非 Web，无法用 iframe 展示）：靶机页签显示「连接信息」，
+// 学生在操作环境桌面用 nc/pwntools 连接容器名:端口，getshell 拿 flag。
+const PWN_TARGETS: Record<number, { container: string; port: number; startEndpoint: string }> = {
+  15: { container: 'stack-overflow-lab-web-1', port: 70, startEndpoint: '/api/docker/start-stack' },
+}
+const pwnTarget = computed(() => PWN_TARGETS[Number(experiment.value.id) || Number(route.params.id)] || null)
+const isPwnTarget = computed(() => Boolean(pwnTarget.value))
+
 onMounted(async () => {
-  // 始终滚动到顶部，避免从其他页面（如个人画像）跳入时停留在底部
-  window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior })
   try {
     // 如果没有提供模块ID，重定向到模块列表页面
     if (!moduleId) {
@@ -164,6 +178,11 @@ onMounted(async () => {
         }
       });
     }
+    // 栈溢出等 TCP pwn 靶机一直默认在线：进入页面即自动准备（幂等启动 + 建立会话），
+    // 使靶机徽章显示「运行中」、右侧连接卡默认展示，Flag 也可直接提交，无需手动点「准备靶机」。
+    if (isPwnTarget.value) {
+      void startTargetMachine();
+    }
   } catch (error) {
     console.error('加载模块数据失败:', error);
     // 使用内联通知替代alert
@@ -177,10 +196,6 @@ onMounted(async () => {
     }, 2000);
   } finally {
     isLoading.value = false;
-    // 数据加载并渲染完成后再次滚到顶部：onMounted 首次滚动时题目尚未渲染，
-    // DOM 撑高后视口可能停留在旧偏移，这里在 DOM 刷新后强制回到顶部
-    await nextTick();
-    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   }
 });
 
@@ -188,10 +203,6 @@ onMounted(async () => {
 const showNoVNC = ref(false)
 const isOperationMachineRunning = ref(false)
 const isTargetMachineRunning = ref(false)
-
-// noVNC 操作环境桌面地址，可通过环境变量配置
-const NOVNC_URL = import.meta.env.VITE_NOVNC_URL || 'http://127.0.0.1:8443'
-const operationMachineError = ref('')
 
 // 添加加载状态
 const isTargetLoading = ref(false)
@@ -204,6 +215,9 @@ const activeEnvironmentTab = ref<'operation' | 'target' | null>(null);
 const targetMachineUrl = ref('')
 const labSessionId = ref('')
 const currentTargetContainerName = ref('')
+const operationSessionId = ref('')
+const operationVncWsUrl = ref('')
+const operationVncPassword = '123456'
 type TargetMachineStatus = 'offline' | 'starting' | 'online'
 
 interface DockerTargetStatus {
@@ -221,7 +235,9 @@ interface DockerTargetStatus {
   reason?: string
 }
 
-const DOCKER_API_URL = import.meta.env.VITE_DOCKER_API_URL || "http://localhost:3000";
+const DOCKER_API_URL =
+  import.meta.env.VITE_DOCKER_API_URL ||
+  (import.meta.env.DEV ? "http://localhost:3000" : "");
 const targetMachineStatus = ref<TargetMachineStatus>('offline')
 const targetMachineMessage = ref('靶机环境未启动')
 const targetStatusDetail = ref<DockerTargetStatus | null>(null)
@@ -253,7 +269,18 @@ const targetStatusLabel = computed(() => {
   if (targetMachineStatus.value === 'starting') return '启动中'
   return '未就绪'
 })
-const targetPanelVisible = computed(() => activeEnvironmentTab.value === 'target' && (isTargetLoading.value || targetMachineStatus.value !== 'offline' || Boolean(targetMachineUrl.value)))
+const targetPanelVisible = computed(() => activeEnvironmentTab.value === 'target' && (isPwnTarget.value || isTargetPending.value || isTargetLoading.value || targetMachineStatus.value !== 'offline' || Boolean(targetMachineUrl.value)))
+const operationTargetUrl = computed(() => {
+  const urls: Record<number, string> = {
+    1: 'http://sqli-lab-web-1/index.php',
+    2: 'http://xss-lab-web-1/index.php',
+    3: 'http://csrf-lab-web-1/index.php',
+    4: 'http://command-inject-web-1/index.html',
+    5: 'http://file-upload-lab-web-1/index.php',
+    6: 'http://directory-traversal-lab-web-1/index.php',
+  }
+  return urls[getBaseLabId()] || ''
+})
 
 const moduleOverviewCards = computed(() => {
   const totalScore = experiment.value.taskPoints.reduce((sum, task) => sum + Number(task.score || 0), 0)
@@ -344,31 +371,48 @@ watch(experiment, (newExperiment) => {
   }
 }, { immediate: true })
 
-// 修改启动/关闭操作环境函数
+// 调用 ai-agent-service 拉起 per-user noVNC 操作桌面。
 const toggleOperationMachine = async () => {
   if (!isOperationMachineRunning.value) {
-    // 启动操作环境
     isOperationLoading.value = true
-    operationMachineError.value = ''
-
-    // 检查 noVNC 服务是否可访问
     try {
-      await axios.get(NOVNC_URL, { timeout: 5000 })
-    } catch {
-      operationMachineError.value = `操作环境桌面 (${NOVNC_URL}) 无法连接。请确认 noVNC 容器已启动。`
-      isOperationLoading.value = false
-      return
-    }
+      const userContext = await getCurrentUserContext()
+      const response = await axios.post('/api/docker/operation/start', {
+        user_id: userContext.user_id ?? 0,
+        module_id: experiment.value.id,
+        course_id: null,
+      })
+      const data = response.data?.data
+      if (!data?.session_id || !data?.ws_path) {
+        throw new Error('后端未返回操作环境连接信息')
+      }
 
-    isOperationMachineRunning.value = true
-    activeEnvironmentTab.value = 'operation'
-    isOperationLoading.value = false
+      operationSessionId.value = data.session_id
+      const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      operationVncWsUrl.value = `${wsScheme}://${window.location.host}${data.ws_path}`
+      isOperationMachineRunning.value = true
+      activeEnvironmentTab.value = 'operation'
+    } catch (error: any) {
+      console.error('[OperationEnv] 启动操作环境失败:', error)
+      pointsNotification.value = {
+        show: true,
+        message: error?.response?.data?.detail || error?.message || '启动操作环境失败，请检查 ai-agent-service 与 Docker 是否就绪',
+      }
+      clearPointsNotification()
+    } finally {
+      isOperationLoading.value = false
+    }
   } else {
-    // 关闭操作环境
+    const sessionId = operationSessionId.value
     isOperationMachineRunning.value = false
-    operationMachineError.value = ''
+    operationSessionId.value = ''
+    operationVncWsUrl.value = ''
     if (activeEnvironmentTab.value === 'operation') {
       activeEnvironmentTab.value = isTargetMachineRunning.value ? 'target' : null
+    }
+    if (sessionId) {
+      axios.post('/api/docker/operation/stop', { session_id: sessionId })
+        .catch((error) => console.warn('[OperationEnv] 停止操作环境失败:', error))
     }
   }
 }
@@ -417,6 +461,13 @@ const getDockerLabKey = (baseId: number): string => {
 const normalizeTargetUrl = (url?: string | null): string => {
   const cleaned = cleanUrl(String(url || '').trim());
   if (!cleaned) return '';
+  const baseId = getBaseLabId();
+  if (baseId === 4) {
+    if (cleaned.endsWith('/')) return `${cleaned}index.html`;
+    if (cleaned.endsWith('index.php')) return cleaned.replace('index.php', 'index.html');
+    if (!cleaned.endsWith('.php') && !cleaned.endsWith('.html')) return `${cleaned}/index.html`;
+    return cleaned;
+  }
   if (cleaned.endsWith('/')) return `${cleaned}index.php`;
   if (cleaned.endsWith('index.html')) return cleaned.replace('index.html', 'index.php');
   if (!cleaned.endsWith('.php') && !cleaned.endsWith('.html')) return `${cleaned}/index.php`;
@@ -467,7 +518,24 @@ const getDockerStartEndpoint = (baseId: number): string => {
   }
 };
 
-const getDefaultTargetUrl = (_baseId: number): string => '';
+const getDefaultTargetUrl = (baseId: number): string => {
+  switch (baseId) {
+    case 1:
+      return 'http://localhost:8091/index.php';
+    case 2:
+      return 'http://localhost:8092/index.php';
+    case 3:
+      return 'http://localhost:8093/index.php';
+    case 4:
+      return 'http://localhost:8090/index.html';
+    case 5:
+      return 'http://localhost:8094/index.php';
+    case 6:
+      return 'http://localhost:8095/index.php';
+    default:
+      return 'http://localhost:8091/index.php';
+  }
+};
 
 const registerOnlineTargetSession = async (baseId: number) => {
   const containerName = CONTAINER_NAMES[baseId] || 'sqli-lab-web-1'
@@ -534,6 +602,28 @@ const refreshTargetMachineStatus = async () => {
 
 // 修改启动靶机函数
 const startTargetMachine = async () => {
+  // TCP pwn 靶机：确保容器运行 + 建立靶机会话（用于 Flag 提交），并切到「连接信息」页签
+  if (isPwnTarget.value) {
+    activeEnvironmentTab.value = 'target';
+    if (isTargetLoading.value) return;
+    isTargetLoading.value = true;
+    try {
+      await axios.post(`${DOCKER_API_URL}${pwnTarget.value!.startEndpoint}`);
+      isTargetMachineRunning.value = true;
+      targetMachineStatus.value = 'online';
+      await registerOnlineTargetSession(getBaseLabId());
+    } catch (error: any) {
+      pointsNotification.value = {
+        show: true,
+        message: error?.response?.data?.message || error?.message || '靶机准备失败，请确认 docker-api 与靶机容器已就绪'
+      };
+      clearPointsNotification();
+    } finally {
+      isTargetLoading.value = false;
+    }
+    return;
+  }
+  if (isTargetPending.value) { activeEnvironmentTab.value = 'target'; return; } // 靶机环境建设中：仅切到占位页签，不启动靶机
   if (isTargetLoading.value) return; // 防止重复点击
   isTargetLoading.value = true;
   const minLoadingTime = 3000; // 最少显示3秒
@@ -636,8 +726,6 @@ const startTargetMachine = async () => {
     console.log(`启动靶机，模块ID: ${currentId}, 基础ID: ${baseId}, 使用API: ${apiEndpoint}`);
     
     // 导入Docker API URL
-    const DOCKER_API_URL = import.meta.env.VITE_DOCKER_API_URL || "http://localhost:3000";
-    
     // 尝试调用API启动靶机
     async function fetchData(retryCount = 0) {
       try {
@@ -962,19 +1050,29 @@ const sendEventsAndEndLab = async () => {
   }
 
   try {
-    const containerName = currentTargetContainerName.value || currentLabContainer.value
-    if (containerName) {
-      const dockerApiBaseUrl = import.meta.env.VITE_DOCKER_API_URL || 'http://localhost:3000'
-      await axios.post(`${dockerApiBaseUrl}/api/docker/stop/${encodeURIComponent(containerName)}`)
-    }
-  } catch (error) {
-    console.error('[EndExperiment] 停止容器失败:', error)
     pointsNotification.value = {
       show: true,
-      message: '实验事件已提交，但停止靶机失败，请稍后检查容器状态',
+      message: '实验已结束，已保留共享靶机并关闭个人操作环境',
+    }
+    clearPointsNotification()
+  } catch (error) {
+    console.error('[EndExperiment] 结束实验提示失败:', error)
+    pointsNotification.value = {
+      show: true,
+      message: '实验事件已提交，但结束提示显示失败',
     }
     clearPointsNotification()
   } finally {
+    if (operationSessionId.value) {
+      try {
+        await axios.post('/api/docker/operation/stop', { session_id: operationSessionId.value })
+      } catch (error) {
+        console.warn('[EndExperiment] 停止操作环境失败:', error)
+      }
+      operationSessionId.value = ''
+      operationVncWsUrl.value = ''
+      isOperationMachineRunning.value = false
+    }
     labSessionId.value = ''
     currentTargetContainerName.value = ''
     isTargetMachineRunning.value = false
@@ -984,6 +1082,7 @@ const sendEventsAndEndLab = async () => {
     targetMachineMessage.value = '靶机环境未启动'
     targetStatusDetail.value = null
     targetIframeState.value = 'idle'
+    activeEnvironmentTab.value = null
     clearLab()
     showEndExperimentModal.value = false
     isEndingExperiment.value = false
@@ -1116,7 +1215,7 @@ const calculatePoints = computed(() => {
   const difficultyPoints = experiment.value.difficulty * 30
 
   // 时间加成：每小时10分（最长5小时，最高50分）
-  const totalHours = (experiment.value.taskPoints || []).reduce((total, task) => {
+  const totalHours = experiment.value.taskPoints.reduce((total, task) => {
     return total + task.score / 10 // 假设每10分的任务需要1小时
   }, 0)
   // 限制最大计算时长为5小时
@@ -1229,7 +1328,8 @@ const discussions = ref([
 // 在新窗口打开环境
 const openInNewWindow = (type: 'operation' | 'target') => {
   if (type === 'operation') {
-    window.open(NOVNC_URL, '_blank');
+    console.info('[OperationEnv] noVNC 操作环境当前嵌入在页面内，暂不支持直接新窗口打开')
+    return
   } else if (type === 'target' && targetMachineUrl.value) {
     // 确保URL有效
     if (targetMachineUrl.value) {
@@ -1258,7 +1358,7 @@ watch([isOperationMachineRunning, isTargetMachineRunning], ([newOpRunning, newTa
 });
 
 onBeforeRouteLeave((_to, _from, next) => {
-  if (isTargetMachineRunning.value) {
+  if (isTargetMachineRunning.value || isOperationMachineRunning.value) {
     showEndExperimentModal.value = true
     next(false)
     return
@@ -1267,7 +1367,7 @@ onBeforeRouteLeave((_to, _from, next) => {
 })
 
 const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-  if (!isTargetMachineRunning.value) {
+  if (!isTargetMachineRunning.value && !isOperationMachineRunning.value) {
     return
   }
   event.preventDefault()
@@ -1313,32 +1413,42 @@ const openDirectUrl = () => {
 };
 
 // 添加复制到剪贴板功能
-const copyToClipboard = (text: string) => {
-  navigator.clipboard.writeText(text)
-    .then(() => {
-      console.log('URL已复制到剪贴板:', text);
-      // 使用内联通知替代alert
-      pointsNotification.value = {
-        show: true,
-        message: 'URL已复制到剪贴板'
-      };
-      // 5秒后自动清除通知
-      setTimeout(() => {
-        pointsNotification.value.show = false;
-      }, 5000);
-    })
-    .catch(err => {
-      console.error('复制失败:', err);
-      // 使用内联通知替代alert
-      pointsNotification.value = {
-        show: true,
-        message: '复制失败'
-      };
-      // 5秒后自动清除通知
-      setTimeout(() => {
-        pointsNotification.value.show = false;
-      }, 5000);
-    });
+const showCopyNotice = (message: string) => {
+  pointsNotification.value = {
+    show: true,
+    message
+  };
+  setTimeout(() => {
+    pointsNotification.value.show = false;
+  }, 5000);
+};
+
+const fallbackCopyText = (text: string) => {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  if (!ok) throw new Error('execCommand copy failed');
+};
+
+const copyToClipboard = async (text: string) => {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      fallbackCopyText(text);
+    }
+    console.log('URL已复制到剪贴板:', text);
+    showCopyNotice('URL已复制到剪贴板');
+  } catch (err) {
+    console.error('复制失败:', err);
+    showCopyNotice('复制失败，请手动选中复制');
+  }
 };
 </script>
 
@@ -1366,7 +1476,7 @@ const copyToClipboard = (text: string) => {
     </div>
     
     <!-- 模块内容 -->
-    <div v-else class="container-fluid px-4 py-6 overflow-x-hidden h-screen flex flex-col">
+    <div v-else class="container-fluid px-4 py-6 overflow-x-hidden h-full min-h-0 flex flex-col">
       <!-- 积分不足通知 -->
       <div v-if="pointsNotification.show" 
            class="alert alert-warning fixed top-4 right-4 z-50 shadow-lg animate-fade-in-down max-w-md">
@@ -1379,20 +1489,17 @@ const copyToClipboard = (text: string) => {
         </div>
       </div>
       
-      <!-- 返回按钮：优先使用 from 参数指定的来源页，避免 router.go(-1) 因历史栈原因跳到错误页 -->
+      <!-- 返回按钮 -->
       <div class="mb-4 animate-slide-down">
-        <button
-          @click="route.query.from ? router.push(String(route.query.from)) : router.go(-1)"
-          class="btn btn-sm btn-ghost gap-2 hover:bg-base-200"
-        >
+        <button @click="router.go(-1)" class="btn btn-sm btn-ghost gap-2 hover:bg-base-200">
           <i class="fas fa-arrow-left"></i>
           <span>返回</span>
         </button>
       </div>
 
-      <div class="flex">
+      <div class="flex flex-1 min-h-0 overflow-visible">
         <!-- 左侧内容区域 -->
-        <div class="flex flex-col" :class="{ 'w-half': isIframeVisible, 'w-full': !isIframeVisible }">
+        <div class="flex flex-col min-h-0 overflow-y-auto" :class="{ 'w-half': isIframeVisible, 'w-full': !isIframeVisible }">
           <!-- 导航栏 -->
           <div class="bg-base-100 border-b border-base-300">
             <div class="flex items-center gap-6 px-6 py-3">
@@ -1442,7 +1549,7 @@ const copyToClipboard = (text: string) => {
                   <i class="fas fa-server text-info"></i>
                   <span>靶机环境</span>
                   <span class="badge badge-sm" :class="targetStatusBadgeClass">
-                    {{ isTargetLoading ? '启动中' : isTargetMachineRunning ? '运行中' : '未启动' }}
+                    {{ isTargetPending ? '建设中' : isTargetLoading ? '启动中' : isTargetMachineRunning ? '运行中' : '未启动' }}
                   </span>
                   <span v-if="isTargetMachineRunning && hasLiveTargetUrl" class="badge badge-sm badge-success">
                     实时环境
@@ -1450,14 +1557,18 @@ const copyToClipboard = (text: string) => {
                   <button
                     id="start-target-btn"
                     class="btn btn-sm"
-                    :class="isTargetMachineRunning ? 'btn-error' : 'btn-primary'"
-                    @click="isTargetMachineRunning ? closeTargetMachine() : startTargetMachine()"
-                    :disabled="isTargetLoading"
+                    :class="(!isPwnTarget && isTargetMachineRunning) ? 'btn-error' : 'btn-primary'"
+                    @click="isPwnTarget ? startTargetMachine() : (isTargetMachineRunning ? closeTargetMachine() : startTargetMachine())"
+                    :disabled="isTargetLoading || isTargetPending"
                   >
                     <span class="loading loading-spinner loading-xs" v-if="isTargetLoading"></span>
-                    <i :class="isTargetMachineRunning ? 'fas fa-stop' : 'fas fa-play'" class="mr-1" v-else></i>
-                    {{ isTargetLoading ? '正在启动靶机...' : isTargetMachineRunning ? '结束实验' : '开始挑战' }}
+                    <i :class="(!isPwnTarget && isTargetMachineRunning) ? 'fas fa-stop' : 'fas fa-play'" class="mr-1" v-else></i>
+                    {{ isTargetPending ? '建设中'
+                       : isTargetLoading ? '正在准备靶机...'
+                       : isPwnTarget ? (isTargetMachineRunning ? '已就绪·查看连接' : '准备靶机')
+                       : isTargetMachineRunning ? '结束实验' : '开始挑战' }}
                   </button>
+                  <div v-if="isTargetPending" class="text-sm text-base-content/60">靶机环境正在建设中，敬请期待</div>
                   <div v-if="isTargetLoading" class="text-sm text-info">靶机环境正在准备中，请稍候...</div>
                   <div v-else-if="isTargetMachineRunning" class="text-sm text-success">
                     靶机已启动，可以在右侧查看
@@ -1489,6 +1600,23 @@ const copyToClipboard = (text: string) => {
                     title="直接导航"
                   >
                     <i class="fas fa-external-link-alt"></i>
+                  </button>
+                </div>
+
+                <div
+                  v-if="isTargetMachineRunning && isOperationMachineRunning && operationTargetUrl"
+                  class="flex items-center gap-2 bg-info/10 p-2 rounded"
+                >
+                  <span class="text-sm font-semibold">操作环境内访问:</span>
+                  <div class="bg-base-300 px-2 py-1 rounded text-sm font-mono flex-grow">
+                    {{ operationTargetUrl }}
+                  </div>
+                  <button
+                    class="btn btn-xs btn-ghost"
+                    @click="copyToClipboard(operationTargetUrl)"
+                    title="复制操作环境内访问地址"
+                  >
+                    <i class="fas fa-copy"></i>
                   </button>
                 </div>
 
@@ -1608,19 +1736,19 @@ const copyToClipboard = (text: string) => {
                                 <!-- 单选题 -->
                                 <div v-else-if="question.type === 'single-choice'" class="space-y-2">
                                   <div v-for="(option, index) in question.options" :key="index" class="flex items-center gap-2">
-                                    <input type="radio" v-model="answers[task.id][question.id]" :name="'q' + question.id" :value="option" class="radio radio-primary" :disabled="answerStatus[task.id][question.id] === true" />
+                                    <input type="radio" v-model="answers[task.id][question.id]" :name="'q' + question.id" :value="option" class="radio radio-primary" />
                                     <span>{{ option }}</span>
                                   </div>
                                   <div class="flex items-center gap-2 mt-2">
-                                    <button @click="checkAnswer(task.id, question.id)" class="btn btn-primary" :disabled="questionSubmitting[task.id]?.[question.id] || answerStatus[task.id][question.id] === true">{{ questionSubmitting[task.id]?.[question.id] ? '提交中...' : answerStatus[task.id][question.id] === true ? '已通过' : '检查答案' }}</button>
+                                    <button @click="checkAnswer(task.id, question.id)" class="btn btn-primary" :disabled="questionSubmitting[task.id]?.[question.id]">{{ questionSubmitting[task.id]?.[question.id] ? '提交中...' : '检查答案' }}</button>
                                     <span v-if="answerStatus[task.id][question.id] !== null" :class="answerStatus[task.id][question.id] ? 'text-success' : 'text-error'" class="flex items-center">
                                       <i :class="answerStatus[task.id][question.id] ? 'fa-check' : 'fa-times'" class="fas mr-1"></i>
                                       {{ answerStatus[task.id][question.id] ? '答案正确' : '答案错误' }}
                                     </span>
                                   </div>
-
+                                  
                                   <!-- Flag 提交结果显示 -->
-                                  <div v-if="flagSubmitStatus.isSubmitted && flagSubmitStatus.taskId === task.id && flagSubmitStatus.questionId === question.id"
+                                  <div v-if="flagSubmitStatus.isSubmitted && flagSubmitStatus.taskId === task.id && flagSubmitStatus.questionId === question.id" 
                                       :class="flagSubmitStatus.isSuccess ? 'alert alert-success' : 'alert alert-error'"
                                       class="mt-2 animate-fade-in">
                                     <div class="flex items-center">
@@ -1633,19 +1761,19 @@ const copyToClipboard = (text: string) => {
                                 <!-- 多选题 -->
                                 <div v-else-if="question.type === 'multiple-choice'" class="space-y-2">
                                   <div v-for="(option, index) in question.options" :key="index" class="flex items-center gap-2">
-                                    <input type="checkbox" v-model="answers[task.id][question.id]" :value="option" class="checkbox checkbox-primary" :disabled="answerStatus[task.id][question.id] === true" />
+                                    <input type="checkbox" v-model="answers[task.id][question.id]" :value="option" class="checkbox checkbox-primary" />
                                     <span>{{ option }}</span>
                                   </div>
                                   <div class="flex items-center gap-2 mt-2">
-                                    <button @click="checkAnswer(task.id, question.id)" class="btn btn-primary" :disabled="questionSubmitting[task.id]?.[question.id] || answerStatus[task.id][question.id] === true">{{ questionSubmitting[task.id]?.[question.id] ? '提交中...' : answerStatus[task.id][question.id] === true ? '已通过' : '检查答案' }}</button>
+                                    <button @click="checkAnswer(task.id, question.id)" class="btn btn-primary" :disabled="questionSubmitting[task.id]?.[question.id]">{{ questionSubmitting[task.id]?.[question.id] ? '提交中...' : '检查答案' }}</button>
                                     <span v-if="answerStatus[task.id][question.id] !== null" :class="answerStatus[task.id][question.id] ? 'text-success' : 'text-error'" class="flex items-center">
                                       <i :class="answerStatus[task.id][question.id] ? 'fa-check' : 'fa-times'" class="fas mr-1"></i>
                                       {{ answerStatus[task.id][question.id] ? '答案正确' : '答案错误' }}
                                     </span>
                                   </div>
-
+                                  
                                   <!-- Flag 提交结果显示 -->
-                                  <div v-if="flagSubmitStatus.isSubmitted && flagSubmitStatus.taskId === task.id && flagSubmitStatus.questionId === question.id"
+                                  <div v-if="flagSubmitStatus.isSubmitted && flagSubmitStatus.taskId === task.id && flagSubmitStatus.questionId === question.id" 
                                       :class="flagSubmitStatus.isSuccess ? 'alert alert-success' : 'alert alert-error'"
                                       class="mt-2 animate-fade-in">
                                     <div class="flex items-center">
@@ -1719,9 +1847,9 @@ const copyToClipboard = (text: string) => {
         </div>
 
         <!-- iframe部分 -->
-        <div v-if="isIframeVisible" class="w-half h-full border-l border-base-300 relative">
+        <div v-if="isIframeVisible" class="environment-frame w-half min-h-0 border-l border-base-300 relative flex flex-col">
           <!-- 环境标签页 -->
-          <div class="tabs tabs-boxed bg-base-200 p-2 border-b border-base-300">
+          <div class="tabs tabs-boxed bg-base-200 p-2 border-b border-base-300 flex-shrink-0">
             <a 
               class="tab flex-1 gap-2" 
               :class="{ 'tab-active': activeEnvironmentTab === 'operation' }"
@@ -1743,8 +1871,8 @@ const copyToClipboard = (text: string) => {
           </div>
 
           <!-- 新窗口打开按钮 -->
-          <button 
-            v-if="(activeEnvironmentTab === 'operation' && isOperationMachineRunning) || (activeEnvironmentTab === 'target' && isTargetMachineRunning)"
+          <button
+            v-if="activeEnvironmentTab === 'target' && isTargetMachineRunning"
             class="btn btn-sm btn-circle absolute top-3 right-3 z-10 bg-base-100/80 hover:bg-base-100"
             @click="openInNewWindow(activeEnvironmentTab)"
             title="在新窗口打开"
@@ -1753,9 +1881,9 @@ const copyToClipboard = (text: string) => {
           </button>
 
           <!-- 操作环境iframe -->
-          <div v-if="activeEnvironmentTab === 'operation'" class="w-full h-[calc(100%-50px)]">
-            <div v-if="isOperationMachineRunning" class="w-full h-full">
-              <iframe :src="NOVNC_URL" class="w-full h-full border-none"></iframe>
+          <div v-if="activeEnvironmentTab === 'operation'" class="w-full flex-1 min-h-0 overflow-hidden">
+            <div v-if="isOperationMachineRunning && operationVncWsUrl" class="w-full h-full">
+              <VNCViewer :wsUrl="operationVncWsUrl" :password="operationVncPassword" />
             </div>
             <div v-else class="flex flex-col items-center justify-center h-full p-4 text-center">
               <div class="text-6xl text-base-content/20 mb-4">
@@ -1765,10 +1893,6 @@ const copyToClipboard = (text: string) => {
               <p class="text-base-content/70 mb-4">
                 请先启动操作环境
               </p>
-              <div v-if="operationMachineError" class="alert alert-error mb-4 text-sm">
-                <i class="fas fa-exclamation-triangle"></i>
-                <span>{{ operationMachineError }}</span>
-              </div>
               <button class="btn btn-primary btn-sm" @click="toggleOperationMachine" :disabled="isOperationLoading">
                 <span class="loading loading-spinner loading-xs" v-if="isOperationLoading"></span>
                 <i class="fas fa-play mr-1" v-else></i>
@@ -1778,20 +1902,70 @@ const copyToClipboard = (text: string) => {
           </div>
 
           <!-- 靶机环境iframe -->
-          <div v-if="activeEnvironmentTab === 'target'" class="w-full h-[calc(100%-50px)]">
-            <div v-if="targetMachineStatus === 'online' && targetMachineUrl" class="w-full h-full">
+          <div v-if="activeEnvironmentTab === 'target'" class="w-full flex-1 min-h-0 overflow-visible">
+            <!-- TCP pwn 靶机：连接信息卡（栈溢出等，需在操作环境桌面里连接） -->
+            <div v-if="isPwnTarget" class="flex flex-col h-full p-4 gap-4 overflow-y-auto">
+              <div class="alert alert-info">
+                <i class="fas fa-terminal"></i>
+                <span>本靶机是 <b>TCP pwn 服务</b>，无法在网页中直接展示。请在左侧「操作环境」桌面的终端里连接它。</span>
+              </div>
+              <div class="card bg-base-200 flex-1">
+                <div class="card-body p-6 gap-4 justify-center">
+                  <div class="flex items-center gap-2">
+                    <i class="fas fa-server text-primary text-lg"></i>
+                    <span class="font-semibold text-lg">连接目标</span>
+                    <span class="badge" :class="isTargetMachineRunning ? 'badge-success' : 'badge-ghost'">
+                      {{ isTargetMachineRunning ? '已就绪' : '未准备' }}
+                    </span>
+                  </div>
+                  <div class="font-mono bg-base-300 rounded px-3 py-2 text-base">{{ pwnTarget?.container }} : {{ pwnTarget?.port }}</div>
+                  <div class="text-sm opacity-70">在操作环境终端里用 nc 连接：</div>
+                  <div class="font-mono bg-base-300 rounded px-3 py-2 text-base">nc {{ pwnTarget?.container }} {{ pwnTarget?.port }}</div>
+                  <div class="text-sm opacity-70">或用 pwntools 编写 exp：</div>
+                  <pre class="bg-base-300 rounded p-3 text-sm overflow-x-auto"><code>from pwn import *
+io = remote('{{ pwnTarget?.container }}', {{ pwnTarget?.port }})</code></pre>
+                  <div class="text-sm opacity-60 mt-2">
+                    提示：靶机已默认就绪并接入操作环境桌面网络，可直接按上述地址连接。找到栈溢出点、编写 exp 拿到 shell 后 <span class="font-mono">cat flag</span>，把 flag 填到下方任务点提交。
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- 靶机环境建设中占位（后续接入的实验） -->
+            <div v-else-if="isTargetPending" class="flex flex-col items-center justify-center h-full p-4 text-center">
+              <div class="text-6xl text-base-content/20 mb-4">
+                <i class="fas fa-hard-hat"></i>
+              </div>
+              <h3 class="text-xl font-semibold mb-2">靶机环境建设中</h3>
+              <p class="text-base-content/70 max-w-md">
+                本实验的靶机环境正在建设中，敬请期待。<br />
+                当前请在「操作环境」中自行编写栈溢出程序完成本地练习；后续将接入真实靶机，用于远程 getshell 拿 flag。
+              </p>
+            </div>
+            <div v-else-if="targetMachineStatus === 'online' && targetMachineUrl" class="target-panel w-full flex flex-col">
               <!-- 添加调试信息和控制按钮 -->
-              <div class="p-2 bg-info/10 text-info flex items-center justify-between">
-                <div class="text-xs flex-grow flex items-center gap-2">
-                  <span>当前靶机URL:</span>
+              <div class="p-2 bg-info/10 text-info flex items-center justify-between flex-shrink-0">
+                <div class="text-xs flex-grow flex items-center gap-2 flex-wrap">
+                  <span>本机访问:</span>
                   <span class="font-mono">{{ targetMachineUrl }}</span>
                   <button 
                     class="btn btn-xs btn-ghost" 
                     @click="copyToClipboard(targetMachineUrl)"
-                    title="复制URL"
+                    title="复制本机访问地址"
                   >
                     <i class="fas fa-copy"></i>
                   </button>
+                  <template v-if="operationTargetUrl">
+                    <span class="opacity-60">|</span>
+                    <span>操作环境内:</span>
+                    <span class="font-mono">{{ operationTargetUrl }}</span>
+                    <button
+                      class="btn btn-xs btn-ghost"
+                      @click="copyToClipboard(operationTargetUrl)"
+                      title="复制操作环境内访问地址"
+                    >
+                      <i class="fas fa-copy"></i>
+                    </button>
+                  </template>
                 </div>
                 <div class="flex gap-2">
                   <button 
@@ -1817,10 +1991,9 @@ const copyToClipboard = (text: string) => {
                   </button>
                 </div>
               </div>
-              <iframe
-                :src="targetMachineUrl"
-                class="w-full h-[calc(100%-32px)] border-none target-iframe"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+              <iframe 
+                :src="targetMachineUrl" 
+                class="w-full flex-1 min-h-0 border-none target-iframe"
                 @load="() => console.log('靶机iframe加载完成')"
                 @error="(e) => console.error('靶机iframe加载失败', e)"
               ></iframe>
@@ -1850,7 +2023,7 @@ const copyToClipboard = (text: string) => {
           </div>
 
           <!-- 未启动任何环境的提示 -->
-          <div v-if="!activeEnvironmentTab" class="flex flex-col items-center justify-center h-[calc(100%-50px)] p-4 text-center">
+          <div v-if="!activeEnvironmentTab" class="flex flex-col items-center justify-center flex-1 min-h-0 p-4 text-center">
             <div class="text-6xl text-base-content/20 mb-4">
               <i class="fas fa-desktop"></i>
             </div>
@@ -2277,6 +2450,17 @@ body {
 .w-full {
   width: 100%;
   transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.environment-frame {
+  height: calc(100vh - 6.5rem);
+  min-height: 860px;
+  overflow: hidden;
+}
+
+.target-panel {
+  height: 100%;
+  min-height: 0;
 }
 
 /* 确保环境标签页的层级正确 */
