@@ -98,6 +98,10 @@ from teacher_learning_insight_repository import (
     get_knowledge_risk_detail,
     get_learning_replay,
 )
+from capability_growth_repository import (
+    get_student_capability_growth,
+    get_teacher_student_capability_growth,
+)
 from teacher_knowledge_analysis_service import (
     AnalysisAlreadyRunningError as KnowledgeAnalysisAlreadyRunningError,
     KNOWLEDGE_ANALYSIS_SERVICE,
@@ -1801,6 +1805,19 @@ async def student_teacher_assignments(
         raise _repo_error(exc)
 
 
+@app.get("/api/students/{student_id}/capability-growth")
+async def student_capability_growth(
+    student_id: int,
+    teachingClassId: Optional[int] = Query(default=None),
+    current_user: dict[str, Any] = Depends(require_authenticated_user),
+):
+    _require_student_self(current_user, student_id)
+    try:
+        return get_student_capability_growth(student_id, teachingClassId)
+    except Exception as exc:
+        raise _repo_error(exc)
+
+
 @app.post("/api/students/{student_id}/teacher-assignments/{intervention_id}/start")
 async def student_start_teacher_assignment(
     student_id: int,
@@ -1905,6 +1922,22 @@ async def teacher_student_capability_evidence(
 ):
     try:
         return get_capability_evidence(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            student_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/students/{student_id}/capability-growth")
+async def teacher_student_capability_growth(
+    class_id: int,
+    student_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_teacher_student_capability_growth(
             int(current_user.get("user_id") or 0),
             class_id,
             student_id,
