@@ -12,6 +12,21 @@
 
 首期同时覆盖学生个人画像页和教师端单个学生分析页。班级成长排行、复杂自适应测量和跨课程长期能力认证不在首期范围内。
 
+## 真实性硬约束
+
+成长功能只能使用生产学习链路真实写入数据库的数据，并通过后端接口读取。以下规则属于不可降级的验收条件：
+
+- 前端不得导入或调用 `src/mock/profileFallback.ts`、静态 JSON、硬编码分数、随机数或浏览器本地估算；
+- 后端不得使用 showcase、seed、mock、demo、test 或 static-fallback 数据生成成长分数和行为结论；
+- 已知来源值 `showcase-seed`、`static-fallback` 以及包含 `mock`、`demo`、`test`、`seed` 的测试来源必须排除；
+- 没有真实记录时返回空状态或“证据不足”，不得为了页面完整而补造数据；
+- 每个行为指标必须携带真实记录数量、来源类型和可追溯记录标识；
+- 能力快照必须能证明由合格生产事件构建；无法确认来源的旧快照不得用于成长对比；
+- 页面文案不得把相关性描述成因果关系，不得把 AI 生成的评价当作行为事实；
+- 开发和自动化测试可以使用测试夹具，但测试数据不得进入生产接口结果或学生页面。
+
+现有 `src/mock/profileFallback.ts` 可以继续服务明确标记的演示页面，但成长组件和成长接口不得引用它。
+
 ## 设计选择
 
 采用“画像快照变化 + 可比行为证据”方案。
@@ -35,6 +50,8 @@
 3. 每个维度的变化量为 `current_score - baseline_score`；
 4. 只有一条快照时展示当前分数，并标记“尚未形成成长对比”；
 5. 快照缺失时不返回伪造分数，页面进入空状态并提示先完成学习任务或重建画像。
+6. 快照只有在 `profile_summary_json.data_provenance.mode` 为 `production_events` 且存在合格原始记录时才可参与成长比较；
+7. 不满足来源要求的旧快照标记为不可比较，不能与新快照混算。
 
 首期维度保持现有命名：
 
@@ -56,6 +73,7 @@
 - 题目按知识点、题型和难度分桶；
 - 实验行为按能力标签和阶段类型分桶，例如定位、构造、排错、恢复、验证；
 - 无法确定可比关系的数据只作为事件证据展示，不参与趋势结论。
+- 任何被识别为演示、种子、mock 或测试来源的数据既不进入窗口，也不计入样本量。
 
 ### 时间指标
 
@@ -139,6 +157,22 @@
 
 若现有任务缺少能力标签、阶段类型或可靠难度，首期只使用可以明确映射的题目和事件，不能通过标题猜测后写入稳定结论。
 
+真实字段映射如下：
+
+| 指标 | 真实数据表与字段 |
+|---|---|
+| 题目正确率 | `question_submission.is_correct` 或 `generated_question_attempt.is_correct` |
+| 题目有效作答时间 | `question_submission.cost_time` 或 `generated_question_attempt.cost_time` |
+| 可比题目 | `knowledge_point_id`、`question_type`，以及 `generated_question.difficulty` |
+| 实验完成与总耗时 | `challenge_completion_event.completion_status`、`total_time_seconds` |
+| AI 求助次数 | `challenge_completion_event.total_ai_ask_count`、`ai_message.hint_level` |
+| 命令成败与耗时 | `container_command_event.exit_code`、`duration_ms`、`executed_at` |
+| 错误与恢复 | `error_event.command_id`、`error_category`、`occurred_at`，关联后续成功命令或完成事件 |
+| 实验有效活动区间 | `lab_session.start_time/end_time` 与会话内事件时间戳 |
+| 五维能力快照 | `student_profile_snapshot` 的五维分数、`computed_at`、来源区间与来源说明 |
+
+指标查询必须保留数据血缘。对没有 `source` 字段的记录，通过训练会话、实验会话、提交记录或画像来源说明验证其父级来源；无法验证时不纳入成长结论。
+
 ## 后端结构
 
 在现有 `ai-agent-service` 内增量扩展，不新增微服务。
@@ -151,6 +185,8 @@
 4. 聚合可比行为窗口；
 5. 生成结构化证据、样本量和可信度；
 6. 对命令、错误和 AI 内容执行现有截断与脱敏规则。
+7. 过滤非生产来源，并返回被排除记录数量和原因；
+8. 返回计算版本和数据血缘，保证同一版本下结果可复算。
 
 成长聚合使用纯函数拆分，数据库读取与指标计算分离，便于单元测试覆盖时间排除、窗口选取、样本不足和反向指标等规则。
 
@@ -186,6 +222,15 @@
   "teachingClassId": 12,
   "baselineComputedAt": "2026-07-01T09:00:00",
   "currentComputedAt": "2026-07-25T09:00:00",
+  "calculationVersion": "capability-growth-v1",
+  "dataProvenance": {
+    "mode": "production_events",
+    "snapshotIds": ["snapshot-baseline", "snapshot-current"],
+    "eligibleRecordCount": 24,
+    "excludedRecordCount": 3,
+    "excludedReasons": ["showcase-seed"],
+    "sourceTypes": ["question_submission", "container_command_event", "error_event"]
+  },
   "overall": {
     "baselineScore": 62.4,
     "currentScore": 76.8,
@@ -212,7 +257,9 @@
           "baselineSampleCount": 3,
           "currentSampleCount": 3,
           "confidence": "moderate",
-          "explanation": "在可比排错任务中，恢复时间中位数缩短4分钟。"
+          "explanation": "在可比排错任务中，恢复时间中位数缩短4分钟。",
+          "sourceTypes": ["error_event", "container_command_event", "challenge_completion_event"],
+          "sourceRecordIds": ["error-17", "command-44", "completion-9"]
         }
       ],
       "evidence": [
@@ -239,6 +286,8 @@
 
 响应中的数值保留原始单位，前端负责显示分钟、秒、百分比和次数。指标没有稳定比较结果时保留样本数，将数值变化字段设为 `null`。
 
+接口不得接受前端传入的分数、变化量、可信度或行为结论。所有结果由后端根据当前登录身份允许访问的真实数据库记录计算。
+
 ## 学生端页面
 
 在现有个人画像页增加“我的能力成长”区，放在当前统计概览之后、专项训练之前。
@@ -251,6 +300,7 @@
 4. 维度详情：点击维度后展示行为指标；
 5. “为什么提升”：展示 3 至 5 条近期证据；
 6. 数据说明：展示样本量、可比口径和可信度解释。
+7. 数据来源：显示“来自真实实验与作答记录”、统计截止时间和计算版本；不显示不存在的记录。
 
 正向文案示例：
 
@@ -281,6 +331,7 @@
 - 单快照：展示当前能力，隐藏伪造变化值；
 - 行为样本不足：显示样本量和“证据不足”；
 - 部分事件表不可用：仍返回可用的画像变化，并在 `message` 中说明行为证据不完整；
+- 只有演示、种子或 mock 数据：视为没有合格真实数据，不能降级展示这些记录；
 - 请求失败：保留页面上一次成功结果并显示重试入口；
 - 无权限：返回 403，不向前端暴露教学班或学生是否存在的额外信息。
 
@@ -292,6 +343,8 @@
 - 错误输出、AI 对话和命令内容继续执行长度截断；
 - 页面不展示班级其他学生的个人数据；
 - 首期不生成跨班级能力排名。
+- 数据来源过滤在后端执行，不能依赖前端隐藏；
+- 画像重建时在 `profile_summary_json.data_provenance` 写入来源模式、记录数量、计算版本和排除数量。
 
 ## 测试策略
 
@@ -309,6 +362,10 @@
 - 五维指标与证据映射；
 - 学生本人鉴权、教师教学班所有权与成员校验；
 - 敏感命令脱敏。
+- showcase、seed、mock、demo、test 和 static-fallback 来源被排除；
+- 旧快照缺少生产来源证明时不进入成长对比；
+- 响应中的来源记录 ID 能对应到测试数据库中的真实记录；
+- 客户端传入伪造分数或变化量不会影响接口结果。
 
 ### 前端
 
@@ -320,8 +377,19 @@
 - 单快照、证据不足和部分数据错误状态；
 - 点击维度切换指标与证据；
 - 学生端和教师端使用相同口径。
+- 成长组件不导入或调用 `profileFallback.ts`；
+- 空数据和接口错误时不出现任何静态演示分数。
 
 运行 `npm run vue-tsc` 和 `npm run build` 验证类型与生产构建。
+
+### 真实接口联调
+
+- 使用实际登录学生完成题目和实验操作；
+- 查询数据库确认对应作答、命令、错误、完成和画像快照记录；
+- 调用学生成长接口，核对响应中的记录 ID、样本数和计算结果；
+- 使用实际教师账号调用教师成长接口，确认同一学生得到相同口径；
+- 在数据库仅有演示数据时确认接口返回证据不足；
+- 检查浏览器网络响应和页面 DOM，确认没有 `mock-`、`static-fallback`、`showcase-seed` 或硬编码示例值。
 
 ## 验收标准
 
@@ -334,5 +402,8 @@
 - 教师可以查看更详细的比较窗口和证据来源；
 - 单快照、无快照、部分数据不可用和无权限均有明确处理；
 - 新接口通过权限、脱敏和聚合规则测试；
+- 所有成长分数和行为指标来自真实数据库接口，能够追溯到原始记录；
+- 演示、种子、mock、test 和 static-fallback 数据不会进入结果；
+- 没有合格真实数据时页面如实显示空状态；
+- 使用真实学生行为完成一次数据库、接口、页面三方核对；
 - 前端单元测试、类型检查和生产构建通过。
-
