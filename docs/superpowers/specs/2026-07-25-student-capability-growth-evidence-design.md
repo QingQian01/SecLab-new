@@ -22,6 +22,7 @@
 - 没有真实记录时返回空状态或“证据不足”，不得为了页面完整而补造数据；
 - 每个行为指标必须携带真实记录数量、来源类型和可追溯记录标识；
 - 能力快照必须能证明由合格生产事件构建；无法确认来源的旧快照不得用于成长对比；
+- 只要画像构建窗口中混入一条演示、测试或来源不可验证的记录，该快照就不得标记为 `production_events`；
 - 页面文案不得把相关性描述成因果关系，不得把 AI 生成的评价当作行为事实；
 - 开发和自动化测试可以使用测试夹具，但测试数据不得进入生产接口结果或学生页面。
 
@@ -50,7 +51,7 @@
 3. 每个维度的变化量为 `current_score - baseline_score`；
 4. 只有一条快照时展示当前分数，并标记“尚未形成成长对比”；
 5. 快照缺失时不返回伪造分数，页面进入空状态并提示先完成学习任务或重建画像。
-6. 快照只有在 `profile_summary_json.data_provenance.mode` 为 `production_events` 且存在合格原始记录时才可参与成长比较；
+6. 快照只有在 `profile_summary_json.data_provenance.mode` 为 `production_events`、存在合格原始记录且排除/不可验证记录数均为 0 时才可参与成长比较；
 7. 不满足来源要求的旧快照标记为不可比较，不能与新快照混算。
 
 首期维度保持现有命名：
@@ -227,8 +228,9 @@
     "mode": "production_events",
     "snapshotIds": ["snapshot-baseline", "snapshot-current"],
     "eligibleRecordCount": 24,
-    "excludedRecordCount": 3,
-    "excludedReasons": ["showcase-seed"],
+    "excludedRecordCount": 0,
+    "unverifiableRecordCount": 0,
+    "excludedReasons": [],
     "sourceTypes": ["question_submission", "container_command_event", "error_event"]
   },
   "overall": {
