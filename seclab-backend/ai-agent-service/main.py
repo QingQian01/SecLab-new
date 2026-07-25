@@ -646,9 +646,15 @@ def _teacher_repo_error(exc: Exception) -> HTTPException:
     if isinstance(exc, InsufficientAnalysisDataError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, TeacherAnalysisProviderError):
-        return HTTPException(status_code=503, detail=f"{exc} 已保留上次成功结果。")
+        return HTTPException(
+            status_code=503,
+            detail="本次智能分析未生成可用结论，当前仍显示上次成功结果；原始作答统计不受影响，请稍后重试。",
+        )
     if isinstance(exc, KnowledgeProviderUnavailableError):
-        return HTTPException(status_code=503, detail=f"{exc} 已保留上次成功结果。")
+        return HTTPException(
+            status_code=503,
+            detail="本次智能分析未生成可用结论，当前仍显示上次成功结果；原始作答统计不受影响，请稍后重试。",
+        )
     if isinstance(exc, KeyError):
         return HTTPException(status_code=404, detail="请求的数据已不存在或无权访问。")
     if isinstance(exc, ValueError):

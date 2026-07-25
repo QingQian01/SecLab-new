@@ -4,6 +4,7 @@ import {
   buildKnowledgeRiskPie,
   classifyKnowledgeRisk,
   findMatchingRiskItem,
+  getAnalysisRefreshPresentation,
   getRiskPresentation,
   getTimelineEventPresentation,
   normalizeEvidenceCount,
@@ -77,6 +78,28 @@ describe('teaching analysis presentation', () => {
       '已保留上一次成功结果',
       'aiHealth.message',
     ]) expect(pageSource).not.toContain(phrase)
+  })
+
+  it('turns a provider refresh failure into a scoped teacher-facing status', () => {
+    const presentation = getAnalysisRefreshPresentation(
+      {
+        response: {
+          status: 503,
+          data: {
+            detail: 'Dify 已返回内容，但 Agent 输出格式不正确。',
+          },
+        },
+      },
+      true,
+    )
+
+    expect(presentation).toEqual({
+      tone: 'warning',
+      message: '本次智能分析未更新，当前仍显示上次结果；原始作答统计不受影响。',
+    })
+    expect(presentation.message).not.toContain('Dify')
+    expect(presentation.message).not.toContain('Agent')
+    expect(presentation.message).not.toContain('格式')
   })
   it('maps risk levels to stable teacher-facing labels', () => {
     expect(getRiskPresentation('high')).toEqual({ label: '高风险', tone: 'danger' })

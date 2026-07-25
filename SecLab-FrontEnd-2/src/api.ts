@@ -875,6 +875,14 @@ export interface TeacherCourseAnalysisDto {
             knowledgePointName: string;
             evidence?: string;
             teacherAction?: string;
+            affectedStudents?: string[];
+            representativeQuestionId?: string | null;
+            representativeQuestionTitle?: string | null;
+            observedAnswer?: string | null;
+            standardAnswer?: string | null;
+            diagnosis?: string | null;
+            instruction?: string | null;
+            check?: string | null;
             incorrectQuestionCount?: number;
             affectedStudentCount?: number;
             accuracyRate?: number;

@@ -18,6 +18,7 @@ from training_repository import list_generated_question_attempts
 
 
 USER_SERVICE_SCHEMA = "userservice"
+COURSE_ANALYSIS_PROVIDER_TIMEOUT_SECONDS = 30
 
 
 def _iso(value: Any) -> Optional[str]:
@@ -123,6 +124,137 @@ def build_course_question_summary(records: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def _display_answer(value: Any, limit: int = 180) -> str:
+    if value is None:
+        return "未记录"
+    if isinstance(value, str):
+        text = value.strip()
+    else:
+        text = json.dumps(value, ensure_ascii=False)
+    if not text:
+        return "未记录"
+    return text if len(text) <= limit else f"{text[:limit - 1]}…"
+
+
+def _answer_key(value: Any) -> str:
+    return "".join(
+        character.lower()
+        for character in _display_answer(value)
+        if not character.isspace()
+    )
+
+
+def _meaningfully_different_answer(observed: Any, standard: Any) -> bool:
+    observed_key = _answer_key(observed)
+    standard_key = _answer_key(standard)
+    if observed_key in {"", "未记录"} or standard_key in {"", "未记录"}:
+        return False
+    return observed_key not in standard_key and standard_key not in observed_key
+
+
+def _teaching_strategy(
+    knowledge_name: str,
+    *,
+    question_title: str,
+    student_label: str,
+) -> tuple[str, str, str]:
+    normalized = knowledge_name.lower()
+    if "sql" in normalized and ("联合" in knowledge_name or "列数" in knowledge_name):
+        return (
+            "作答缺少 ORDER BY 逐级探测、首次报错位置与最终列数之间的完整判断链。",
+            f"用《{question_title}》现场演示 ORDER BY 1、2、3…直到首次报错，再用 UNION SELECT NULL 补齐相同列数验证结果。",
+            f"让 {student_label} 独立判断一个不同列数的查询；答案必须写出探测序列、首次报错序号和最终列数。",
+        )
+    if "xss" in normalized or "上下文" in knowledge_name:
+        return (
+            "作答没有先识别属性上下文，容易把所有输出统一按 HTML 文本转义处理。",
+            f"围绕《{question_title}》并排展示同一输入进入 HTML 文本、属性值和 JavaScript 三种位置时的解析差异，再标出引号闭合与危险协议。",
+            f"让 {student_label} 对三个输出点先标注上下文，再分别选择编码方式并说明不能通用替换的原因。",
+        )
+    if "上传" in knowledge_name or "文件类型" in knowledge_name:
+        return (
+            "作答把扩展名或 Content-Type 当成可信类型，缺少内容特征、存储位置和执行权限的联合校验。",
+            f"用《{question_title}》对比扩展名、Content-Type 与文件头三类证据，演示伪造 MIME 后为什么仍需重命名、隔离存储并关闭执行权限。",
+            f"让 {student_label} 审核两个上传请求，逐项写出服务端应检查的内容特征、保存路径和权限设置。",
+        )
+    if "命令" in knowledge_name and "空格" in knowledge_name:
+        return (
+            "作答只关注普通空格，没有覆盖 IFS、变量展开、重定向等 shell 等价表达。",
+            f"用《{question_title}》逐一替换空格并观察命令仍可执行的路径，再对比无 shell 参数化调用。",
+            f"让 {student_label} 标出三种绕过路径，并将易受攻击的命令改写为参数数组调用。",
+        )
+    return (
+        "最后作答与参考答案的关键步骤不一致，需要先定位缺失的判断依据。",
+        f"以《{question_title}》为例逐句对照学生作答与参考答案，圈出缺失步骤并要求学生解释每一步的验证目的。",
+        f"让 {student_label} 完成一道同知识点题，除最终答案外必须写出关键判断步骤和验证依据。",
+    )
+
+
+def _build_knowledge_finding(
+    summary_item: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    knowledge_name = str(summary_item["knowledgePointName"])
+    wrong_records = []
+    for item in records:
+        if str(item.get("knowledgePointName") or "未标注知识点") != knowledge_name:
+            continue
+        latest = _latest(item.get("attemptHistory") or [])
+        if latest and latest.get("isCorrect") is False:
+            wrong_records.append((item, latest))
+
+    student_names = list(
+        dict.fromkeys(
+            str((item.get("student") or {}).get("studentName") or "未知学生")
+            for item, _ in wrong_records
+        )
+    )
+    representative_item, representative_attempt = next(
+        (
+            (item, latest)
+            for item, latest in wrong_records
+            if _meaningfully_different_answer(
+                latest.get("answer"),
+                item.get("standardAnswer") or item.get("referenceAnswer"),
+            )
+        ),
+        wrong_records[0] if wrong_records else ({}, {}),
+    )
+    question_title = str(representative_item.get("title") or "未命名题目")
+    observed_answer = _display_answer(representative_attempt.get("answer"))
+    standard_answer = _display_answer(
+        representative_item.get("standardAnswer")
+        or representative_item.get("referenceAnswer")
+    )
+    if not student_names:
+        student_names = ["暂无可定位学生"]
+    student_label = "、".join(student_names[:4])
+    if len(student_names) > 4:
+        student_label = f"{student_label}等 {len(student_names)} 人"
+    diagnosis, instruction, check = _teaching_strategy(
+        knowledge_name,
+        question_title=question_title,
+        student_label=student_label,
+    )
+    teacher_action = f"先处理 {student_label}；{instruction}；{check}"
+    return {
+        **summary_item,
+        "evidence": (
+            f"{summary_item['questionCount']} 道题中有 {summary_item['incorrectQuestionCount']} 道最后一次仍答错，"
+            f"正确率 {summary_item['accuracyRate'] * 100:.0f}%，涉及 {summary_item['affectedStudentCount']} 名学生。"
+        ),
+        "affectedStudents": student_names,
+        "representativeQuestionId": representative_item.get("generatedQuestionId"),
+        "representativeQuestionTitle": question_title,
+        "observedAnswer": observed_answer,
+        "standardAnswer": standard_answer,
+        "diagnosis": diagnosis,
+        "instruction": instruction,
+        "check": check,
+        "teacherAction": teacher_action,
+    }
+
+
 def build_course_analysis_fallback(
     records: list[dict[str, Any]],
     *,
@@ -165,11 +297,7 @@ def build_course_analysis_fallback(
         ),
         "summary": summary,
         "knowledgeFindings": [
-            {
-                **item,
-                "evidence": f"该知识点有 {item['incorrectQuestionCount']} 道题最后一次仍答错，涉及 {item['affectedStudentCount']} 名学生。",
-                "teacherAction": "打开下方错题查看学生答案与标准答案，讲评后下发同知识点变式题。",
-            }
+            _build_knowledge_finding(item, records)
             for item in weak
         ],
         "representativeMistakes": representative,
@@ -347,9 +475,46 @@ async def run_course_analysis(class_id: int, course_id: int, current_user: dict[
     result = None
     prompt = "你是网络安全课程教师助理。请只根据给定课程作答证据返回JSON，字段包括overallComment、knowledgeFindings、representativeMistakes、teachingSuggestions；不得按五维画像组织结论。证据：" + json.dumps(evidence, ensure_ascii=False)
     try:
-        payload = await asyncio.wait_for(_call_dify_for_student_analysis(prompt, f"course-{course_id}-{scope.lower()}-{student_id or class_id}"), timeout=12)
+        payload = await asyncio.wait_for(
+            _call_dify_for_student_analysis(
+                prompt,
+                f"course-{course_id}-{scope.lower()}-{student_id or class_id}",
+            ),
+            timeout=COURSE_ANALYSIS_PROVIDER_TIMEOUT_SECONDS,
+        )
         if isinstance(payload, dict) and payload.get("overallComment"):
-            result = {**payload, "scope": "student_course" if student_id else "class_course", "courseId": course_id, "courseName": evidence["course"]["courseName"], "generatedBy": "dify", "fallbackUsed": False, "generatedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat()}
+            grounded = build_course_analysis_fallback(
+                evidence["items"],
+                scope=scope,
+                course=evidence["course"],
+            )
+            provider_findings = {
+                str(item.get("knowledgePointName") or ""): item
+                for item in payload.get("knowledgeFindings") or []
+                if isinstance(item, dict)
+            }
+            result = {
+                **payload,
+                "scope": "student_course" if student_id else "class_course",
+                "courseId": course_id,
+                "courseName": evidence["course"]["courseName"],
+                "generatedBy": "dify",
+                "fallbackUsed": False,
+                "providerMessage": None,
+                "generatedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                "summary": evidence["summary"],
+                "knowledgeFindings": [
+                    {
+                        **item,
+                        **provider_findings.get(str(item.get("knowledgePointName") or ""), {}),
+                    }
+                    for item in grounded["knowledgeFindings"]
+                ],
+                "representativeMistakes": payload.get("representativeMistakes")
+                or grounded["representativeMistakes"],
+                "teachingSuggestions": payload.get("teachingSuggestions")
+                or grounded["teachingSuggestions"],
+            }
     except Exception as exc:
         provider_message = provider_failure_message(exc)
     if result is None:

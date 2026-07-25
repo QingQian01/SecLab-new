@@ -1,6 +1,22 @@
 export type PresentationTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 export type KnowledgeRiskTone = 'high' | 'medium' | 'attention' | 'good'
 
+export function getAnalysisRefreshPresentation(
+  _error: unknown,
+  hasPreviousResult: boolean,
+): { tone: PresentationTone; message: string } {
+  if (hasPreviousResult) {
+    return {
+      tone: 'warning',
+      message: '本次智能分析未更新，当前仍显示上次结果；原始作答统计不受影响。',
+    }
+  }
+  return {
+    tone: 'danger',
+    message: '本次智能分析未生成可用结论，请稍后重试；原始作答统计不受影响。',
+  }
+}
+
 const KNOWLEDGE_RISK_PRESENTATION: Record<KnowledgeRiskTone, { label: string; color: string }> = {
   high: { label: '严重错误', color: '#c9483c' },
   medium: { label: '重点关注', color: '#e98c3d' },

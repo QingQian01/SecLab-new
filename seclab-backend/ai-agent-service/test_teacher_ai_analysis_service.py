@@ -6,6 +6,7 @@ import httpx
 
 from teacher_ai_analysis_service import (
     _call_dify_for_student_analysis,
+    _extract_json_object,
     _parse_dify_streaming_answer,
     build_class_ai_input,
     build_class_rule_fallback_analysis,
@@ -77,6 +78,18 @@ def _stream_body(answer=None, *, end_event="message_end", prefix_lines=None):
 
 
 class TeacherAiAnalysisServiceTest(unittest.TestCase):
+    def test_extract_json_object_uses_final_answer_after_reasoning_block(self):
+        text = """<think>
+模型推理过程中先形成了一份草稿：
+{"overallComment": "草稿", "commonProblems": []}
+</think>
+{"overallComment": "最终结论", "commonProblems": [{"title": "列数判断错误"}]}"""
+
+        result = _extract_json_object(text)
+
+        self.assertEqual(result["overallComment"], "最终结论")
+        self.assertEqual(result["commonProblems"][0]["title"], "列数判断错误")
+
     def test_teaching_class_analysis_rejects_question_ids_outside_evidence(self):
         payload = {
             "overallComment": "本班在输出上下文判断上存在共性问题。",
