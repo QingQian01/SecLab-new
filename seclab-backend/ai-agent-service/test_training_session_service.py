@@ -127,6 +127,64 @@ class TrainingQuestionConcurrencyTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(rows), 4)
 
+    def test_persisted_knowledge_fallback_reuses_real_stems_answers_and_sources(self):
+        rows, generator = training_session_service._build_grounded_fallback_rows(
+            request(4),
+            knowledge_units=[
+                {
+                    "knowledgeUnitId": "question-live-1",
+                    "moduleId": 1,
+                    "moduleTitle": "SQL注入基础实验",
+                    "question": "数据库层注入与浏览器层脚本执行的核心区别是什么？",
+                    "answer": "前者影响数据库查询，后者在浏览器执行脚本。",
+                    "explanation": "该题来自已持久化训练题。",
+                    "knowledgeTags": ["SQL注入", "XSS"],
+                    "difficulty": 3,
+                },
+                {
+                    "knowledgeUnitId": "question-live-2",
+                    "moduleId": 1,
+                    "moduleTitle": "SQL注入基础实验",
+                    "question": "参数化查询为什么能降低 SQL 注入风险？",
+                    "answer": "它将 SQL 结构和输入数据分离。",
+                    "explanation": "该题来自已持久化训练题。",
+                    "knowledgeTags": ["SQL注入"],
+                    "difficulty": 3,
+                },
+            ],
+            example_questions=[
+                {
+                    "exampleQuestionId": "approved-1",
+                    "title": "联合查询识别",
+                    "stem": "UNION 在联合查询注入中的作用是什么？",
+                    "standardAnswer": "合并两个查询结果集。",
+                    "explanation": "该题来自平台标准题库。",
+                    "knowledgeTags": ["SQL注入", "联合查询"],
+                    "difficulty": 3,
+                    "gradingRubric": [{"point": "说明结果集合并", "score": 100}],
+                },
+                {
+                    "exampleQuestionId": "approved-2",
+                    "title": "输出编码",
+                    "stem": "上下文输出编码为什么能降低 XSS 风险？",
+                    "standardAnswer": "避免不可信输入进入脚本执行上下文。",
+                    "explanation": "该题来自平台标准题库。",
+                    "knowledgeTags": ["XSS", "输出编码"],
+                    "difficulty": 2,
+                    "gradingRubric": [{"point": "说明执行上下文", "score": 100}],
+                },
+            ],
+            training_session_id="train-real-fallback",
+        )
+
+        self.assertEqual(generator, "persisted_knowledge")
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0]["stem"], "数据库层注入与浏览器层脚本执行的核心区别是什么？")
+        self.assertEqual(rows[0]["answer"], "前者影响数据库查询，后者在浏览器执行脚本。")
+        self.assertEqual(rows[0]["sourceKnowledgeUnitIds"], ["question-live-1"])
+        self.assertEqual(rows[2]["stem"], "UNION 在联合查询注入中的作用是什么？")
+        self.assertEqual(rows[2]["sourceExampleQuestionIds"], ["approved-1"])
+
 
 class TrainingQuestionTimeoutTest(unittest.IsolatedAsyncioTestCase):
     async def test_question_set_timeout_returns_a_stable_504_error(self):
