@@ -264,12 +264,25 @@ export interface ProfileDashboardTag {
 }
 
 export interface ProfileDashboardSolveRecord {
-    id: number;
+    id: string;
+    sourceType: string;
+    questionId: string;
+    trainingSessionId?: string;
+    title: string;
     experiment: string;
+    stem: string;
+    questionType: string;
     module: string;
     time: string;
     result: string;
+    isCorrect: boolean | null;
     score: number;
+    costTime: number | null;
+    studentAnswer: unknown;
+    standardAnswer: unknown;
+    options: string[];
+    explanation: string;
+    contentAvailable: boolean;
 }
 
 export interface ProfileDashboardResponse {
@@ -1785,7 +1798,11 @@ export async function generateTrainingQuestion(
 export async function generateTrainingQuestionSet(
     payload: TrainingQuestionSetRequest
 ): Promise<TrainingQuestionSetResponse> {
-    const response = await axios.post(`${AGENT_BASE_URL}/api/training/generate-question-set`, payload);
+    const response = await axios.post(
+        `${AGENT_BASE_URL}/api/training/generate-question-set`,
+        payload,
+        { timeout: 50_000 }
+    );
     return response.data;
 }
 

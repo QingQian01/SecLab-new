@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { User } from '../../../types/user'
 import {
@@ -31,7 +31,9 @@ import {
 } from '../../../api'
 import { showToast, useCookie } from '../../../common'
 import CapabilityGrowthPanel from '../../../components/CapabilityGrowthPanel.vue'
+import SolveHistoryPanel from './SolveHistoryPanel.vue'
 import TeacherAssignments from './TeacherAssignments.vue'
+import { trainingGenerationErrorMessage, trainingWaitMessage } from './trainingReadiness'
 
 type SolveRecord = ProfileDashboardResponse['solveRecords'][number]
 type LoginStorageUser = Partial<User> & {
@@ -220,6 +222,8 @@ const diagnoseError = ref('')
 const generatingQuestions = ref(false)
 const generateError = ref('')
 const generatingRecommendationId = ref('')
+const generationElapsedSeconds = ref(0)
+let generationElapsedTimer: ReturnType<typeof setInterval> | null = null
 const recommendationQuestionStates = ref<Record<string, RecommendationQuestionState>>({})
 const refreshingProfileAfterSubmit = ref(false)
 const profileRefreshError = ref('')
@@ -534,23 +538,6 @@ const recentTrainingCards = computed(() => {
   ]
 })
 
-const displaySolveRecords = computed(() => {
-  if (solveRecords.value.length) {
-    return solveRecords.value
-  }
-
-  return [
-    {
-      id: 'empty-record',
-      experiment: '暂无学习记录',
-      module: '--',
-      time: '--',
-      result: '--',
-      score: 0
-    }
-  ]
-})
-
 const recentTrainingSummary = computed(() => {
   if (!userTrainingSessions.value.length) {
     return currentProfileSnapshotId.value
@@ -768,7 +755,7 @@ function updateRecommendationQuestionState(item: ProfileRecommendationCard, patc
 
 function recommendationPracticeButtonLabel(item: ProfileRecommendationCard) {
   const state = getRecommendationQuestionState(item)
-  if (isGeneratingRecommendationQuestion(item) || state?.loading) return '正在准备训练题...'
+  if (isGeneratingRecommendationQuestion(item) || state?.loading) return `准备中 ${generationElapsedSeconds.value}s`
   if (state?.completed) return '查看训练报告'
   if (state?.trainingSessionId) return '继续训练'
   return '开始训练'
@@ -832,6 +819,28 @@ function backendErrorCode(error: unknown) {
   return typeof code === 'string' ? code : ''
 }
 
+function isRequestTimeout(error: unknown) {
+  const record = asRecord(error)
+  const code = record?.code
+  const message = record?.message
+  return code === 'ECONNABORTED' || (typeof message === 'string' && message.toLowerCase().includes('timeout'))
+}
+
+function stopGenerationElapsedTimer() {
+  if (generationElapsedTimer !== null) {
+    clearInterval(generationElapsedTimer)
+    generationElapsedTimer = null
+  }
+}
+
+function startGenerationElapsedTimer() {
+  stopGenerationElapsedTimer()
+  generationElapsedSeconds.value = 0
+  generationElapsedTimer = setInterval(() => {
+    generationElapsedSeconds.value += 1
+  }, 1000)
+}
+
 function toggleRecommendationAnswer(item: ProfileRecommendationCard) {
   const current = getRecommendationQuestionState(item)
   if (!current) return
@@ -863,17 +872,7 @@ function hasRecommendationTeachingAnalysis(question: TrainingSingleQuestion | nu
 }
 
 function trainingQuestionErrorMessage(error: unknown) {
-  switch (backendErrorCode(error)) {
-    case 'LLM_NOT_CONFIGURED':
-      return 'AI 出题服务尚未配置，请稍后再试。'
-    case 'KNOWLEDGE_CONTEXT_NOT_FOUND':
-    case 'MISSING_KNOWLEDGE_TARGET':
-      return '当前推荐缺少足够知识库上下文，暂不能生成训练题。'
-    case 'QUESTION_SET_GENERATION_FAILED':
-      return '训练题准备失败，请稍后重试。'
-    default:
-      return '训练题准备失败，请稍后重试。'
-  }
+  return trainingGenerationErrorMessage(backendErrorCode(error), isRequestTimeout(error))
 }
 
 async function generateQuestionForRecommendation(item: ProfileRecommendationCard) {
@@ -893,6 +892,7 @@ async function generateQuestionForRecommendation(item: ProfileRecommendationCard
   }
 
   generatingRecommendationId.value = item.id
+  startGenerationElapsedTimer()
   updateRecommendationQuestionState(item, createEmptyRecommendationPracticeState({ loading: true }))
 
   try {
@@ -938,6 +938,7 @@ async function generateQuestionForRecommendation(item: ProfileRecommendationCard
     updateRecommendationQuestionState(item, createEmptyRecommendationPracticeState({ error: message }))
     showToast(message)
   } finally {
+    stopGenerationElapsedTimer()
     if (generatingRecommendationId.value === item.id) {
       generatingRecommendationId.value = ''
     }
@@ -1655,6 +1656,10 @@ onMounted(() => {
     fetchUserData()
   }, 300)
 })
+
+onBeforeUnmount(() => {
+  stopGenerationElapsedTimer()
+})
 </script>
 
 <template>
@@ -2015,7 +2020,7 @@ onMounted(() => {
                   v-if="isGeneratingRecommendationQuestion(recommendation) || getRecommendationQuestionState(recommendation)?.loading"
                   class="text-xs text-base-content/60 leading-relaxed"
                 >
-                  正在准备训练题，请稍候。
+                  {{ trainingWaitMessage(generationElapsedSeconds, RECOMMENDATION_PRACTICE_COUNT) }}
                 </div>
               </div>
 
@@ -2537,42 +2542,14 @@ onMounted(() => {
 
       <div class="card bg-base-100 shadow-xl mb-6 mt-8">
         <div class="card-body">
-          <h2 class="text-xl font-semibold mb-4">
+          <h2 class="text-xl font-semibold mb-2">
             <i class="fas fa-list-alt text-primary mr-2"></i>
             解题记录
           </h2>
           <p class="text-sm text-base-content/70 mb-4">
-            这里汇总近期实验作答、专项训练和错题回顾，可直接作为学习过程证明材料展示。
+            点击任意记录可查看真实题目、你的答案、正确答案和解析；错题可单独筛选复盘。
           </p>
-          <div v-if="solveRecords.length > 0">
-            <table class="table w-full">
-              <thead>
-                <tr>
-                  <th>实验/题目</th>
-                  <th>模块</th>
-                  <th>答题时间</th>
-                  <th>结果</th>
-                  <th>得分</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="record in displaySolveRecords" :key="record.id">
-                  <td>{{ record.experiment }}</td>
-                  <td>{{ record.module }}</td>
-                  <td>{{ record.time }}</td>
-                  <td>
-                    <span :class="record.result === '正确' ? 'text-success' : 'text-error'">
-                      {{ record.result }}
-                    </span>
-                  </td>
-                  <td>{{ record.score }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="text-base-content/60 text-center py-6">
-            当前学习记录正在汇总中，后续训练与实验提交后会继续在这里自动更新。
-          </div>
+          <SolveHistoryPanel :records="solveRecords" />
         </div>
       </div>
     </div>
