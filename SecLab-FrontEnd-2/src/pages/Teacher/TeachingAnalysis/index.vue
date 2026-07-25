@@ -11,6 +11,7 @@ import {
   getTeachingClassExperimentRiskMap,
   getTeachingClassStudentAnalysis,
   getTeachingClassStudentCapabilityEvidence,
+  getTeachingClassStudentCapabilityGrowth,
   getTeachingClassStudentLearningReplay,
   getTeachingClassStudentProfile,
   getTeachingClassStudents,
@@ -23,6 +24,7 @@ import {
   startTeachingClassStudentAnalysis,
   startTeacherCourseAnalysis,
   type AiAnalysisHealthDto,
+  type CapabilityGrowthResponseDto,
   type CapabilityEvidenceResponseDto,
   type KnowledgeRiskItemDto,
   type LearningReplayResponseDto,
@@ -38,6 +40,7 @@ import {
   type TeacherCourseAnalysisDto,
 } from '../../../api'
 import CapabilityEvidencePanel from './components/CapabilityEvidencePanel.vue'
+import CapabilityGrowthPanel from '../../../components/CapabilityGrowthPanel.vue'
 import KnowledgeRiskPieChart from './components/KnowledgeRiskPieChart.vue'
 import KnowledgeRiskDetailDrawer from './components/KnowledgeRiskDetailDrawer.vue'
 import LearningReplayTimeline from './components/LearningReplayTimeline.vue'
@@ -62,6 +65,8 @@ const classAnalysis = ref<TeachingClassAnalysisDto | null>(null)
 const studentProfile = ref<TeacherStudentProfileResponseDto | null>(null)
 const studentAnalysis = ref<TeachingStudentAnalysisDto | null>(null)
 const capabilityEvidence = ref<CapabilityEvidenceResponseDto | null>(null)
+const capabilityGrowth = ref<CapabilityGrowthResponseDto | null>(null)
+const capabilityGrowthError = ref('')
 const learningReplay = ref<LearningReplayResponseDto | null>(null)
 const riskItems = ref<KnowledgeRiskItemDto[]>([])
 const selectedRisk = ref<KnowledgeRiskItemDto | null>(null)
@@ -231,18 +236,22 @@ async function loadStudentData() {
   const studentId = selectedStudentId.value
   studentDataLoading.value = true
   studentError.value = ''
-  const [profileResult, analysisResult, evidenceResult, replayResult] = await Promise.allSettled([
+  capabilityGrowthError.value = ''
+  const [profileResult, analysisResult, growthResult, evidenceResult, replayResult] = await Promise.allSettled([
     getTeachingClassStudentProfile(classId, studentId),
     getTeachingClassStudentAnalysis(classId, studentId),
+    getTeachingClassStudentCapabilityGrowth(classId, studentId),
     getTeachingClassStudentCapabilityEvidence(classId, studentId),
     getTeachingClassStudentLearningReplay(classId, studentId),
   ])
   if (classId !== selectedClassId.value || studentId !== selectedStudentId.value) return
   studentProfile.value = profileResult.status === 'fulfilled' ? profileResult.value : null
   studentAnalysis.value = analysisResult.status === 'fulfilled' ? analysisResult.value : null
+  capabilityGrowth.value = growthResult.status === 'fulfilled' ? growthResult.value : null
   capabilityEvidence.value = evidenceResult.status === 'fulfilled' ? evidenceResult.value : null
   learningReplay.value = replayResult.status === 'fulfilled' ? replayResult.value : null
   if (profileResult.status === 'rejected') studentError.value = getApiErrorMessage(profileResult.reason, '学生学习数据加载失败。')
+  if (growthResult.status === 'rejected') capabilityGrowthError.value = getApiErrorMessage(growthResult.reason, '能力成长数据加载失败。')
   studentDataLoading.value = false
   await loadStudentCourseData()
 }
@@ -389,6 +398,14 @@ onMounted(() => void loadClasses())
               <div v-else-if="studentDataLoading" class="loading-state">正在读取 {{ selectedStudent.studentName || selectedStudent.studentNumber }} 的学习数据…</div>
               <template v-else><div class="panel-head"><div><h2>{{ selectedStudent.studentName || '未填写姓名' }} · 综合画像</h2><p>{{ selectedStudent.studentNumber }} · 最近活跃 {{ formatDateTime(selectedStudent.recentActivityAt) }}</p></div><button class="secondary-button" :disabled="studentAnalysing" @click="runStudentAnalysis">{{ studentAnalysing ? '正在更新…' : '更新综合画像分析' }}</button></div><div v-if="studentError" class="notice error analysis-notice">{{ studentError }}</div><div class="student-result-body"><div class="profile-score-grid"><div v-for="card in scoreCards" :key="card[0]"><span>{{ card[0] }}</span><strong>{{ formatScore(card[1]) }}</strong></div></div><div v-if="studentAnalysis?.analysis" class="student-analysis-content"><div class="analysis-time">跨实验分析更新于：{{ formatDateTime(studentAnalysis.generatedAt) }}</div><p class="overall-comment">{{ studentAnalysis.analysis.overallComment }}</p><article v-for="item in studentAnalysis.analysis.focusAreas" :key="item.dimension" class="focus-card"><div><strong>{{ item.label }}</strong><span :class="`priority-${item.priority || 'medium'}`">{{ item.priority === 'high' ? '优先关注' : '持续观察' }}</span></div><p>{{ item.evidence }}</p><div class="teacher-action"><span>建议做法</span>{{ item.teacherAction }}</div></article></div></div></template>
             </section>
+            <CapabilityGrowthPanel
+              class="student-result-panel"
+              :data="capabilityGrowth"
+              :loading="studentDataLoading"
+              :error="capabilityGrowthError"
+              teacher-mode
+              @retry="loadStudentData"
+            />
             <section class="panel feature-panel"><CapabilityEvidencePanel :data="capabilityEvidence" /></section>
             <section class="panel feature-panel"><LearningReplayTimeline :items="learningReplay?.items || []" /></section>
           </main>

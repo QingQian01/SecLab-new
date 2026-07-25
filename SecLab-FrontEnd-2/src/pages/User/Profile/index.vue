@@ -8,6 +8,7 @@ import {
   generateTrainingQuestions,
   getProfileDashboard,
   getProfileLatest,
+  getStudentCapabilityGrowth,
   getTrainingSessionSummary,
   getTrainingQuestions,
   getUserInfo,
@@ -18,6 +19,7 @@ import {
   updateUserInfoByToken,
   type GeneratedQuestionAnswerSubmitResponse,
   type GeneratedTrainingQuestion,
+  type CapabilityGrowthResponseDto,
   type ProfileDashboardResponse,
   type ProfileLatestResponse,
   type TrainingDiagnoseResponse,
@@ -28,6 +30,7 @@ import {
   type WeakKnowledgePoint
 } from '../../../api'
 import { showToast, useCookie } from '../../../common'
+import CapabilityGrowthPanel from '../../../components/CapabilityGrowthPanel.vue'
 import TeacherAssignments from './TeacherAssignments.vue'
 
 type SolveRecord = ProfileDashboardResponse['solveRecords'][number]
@@ -198,6 +201,9 @@ const learningProfile = ref({
 const solveRecords = ref<SolveRecord[]>([])
 
 const latestProfile = ref<ProfileLatestResponse | null>(null)
+const capabilityGrowth = ref<CapabilityGrowthResponseDto | null>(null)
+const capabilityGrowthLoading = ref(false)
+const capabilityGrowthError = ref('')
 const trainingDiagnoseResult = ref<TrainingDiagnoseResponse | null>(null)
 const userTrainingSessions = ref<TrainingSessionData[]>([])
 const activeTrainingSessionId = ref('')
@@ -388,6 +394,8 @@ function applyEmptyProfileBundle(loginUser?: LoginStorageUser | null) {
   }
   solveRecords.value = []
   latestProfile.value = null
+  capabilityGrowth.value = null
+  capabilityGrowthError.value = ''
   trainingDiagnoseResult.value = createEmptyTrainingDiagnose(user.value.userId || 0, user.value.classId || 0, 0)
   userTrainingSessions.value = []
 }
@@ -1236,6 +1244,23 @@ async function fetchLatestProfileData(userId: number) {
   }
 }
 
+async function fetchCapabilityGrowth(userId: number) {
+  if (!userId) return null
+  capabilityGrowthLoading.value = true
+  capabilityGrowthError.value = ''
+  try {
+    capabilityGrowth.value = await getStudentCapabilityGrowth(userId)
+    return capabilityGrowth.value
+  } catch (error) {
+    console.error('获取能力成长数据失败:', error)
+    capabilityGrowth.value = null
+    capabilityGrowthError.value = extractErrorMessage(error, '能力成长数据加载失败，请稍后重试。')
+    return null
+  } finally {
+    capabilityGrowthLoading.value = false
+  }
+}
+
 async function fetchUserTrainingSessionsData(userId: number) {
   if (!userId) return []
   try {
@@ -1287,7 +1312,8 @@ async function refreshProfileAfterTrainingSubmit(userId: number) {
   try {
     await Promise.allSettled([
       fetchDashboardData(userId),
-      fetchLatestProfileData(userId)
+      fetchLatestProfileData(userId),
+      fetchCapabilityGrowth(userId)
     ])
     await fetchTrainingDiagnosis(userId)
   } catch (error) {
@@ -1604,7 +1630,8 @@ async function fetchUserData() {
 
     await Promise.allSettled([
       fetchDashboardData(user.value.userId),
-      refreshTrainingPanelData(user.value.userId)
+      refreshTrainingPanelData(user.value.userId),
+      fetchCapabilityGrowth(user.value.userId)
     ])
 
     if (!currentProfileSnapshotId.value && !dashboardError.value) {
@@ -1637,8 +1664,6 @@ onMounted(() => {
         <i class="fas fa-triangle-exclamation"></i>
         <span>{{ pageNotice }}</span>
       </div>
-
-      <TeacherAssignments :user-id="currentUserId" @open-session="openTeacherAssignmentSession" />
 
       <div
         class="card bg-base-100 shadow-xl backdrop-blur-sm border border-base-200 transition-all duration-500 overflow-hidden"
@@ -1771,6 +1796,15 @@ onMounted(() => {
           </div>
         </div>
       </div>
+
+      <CapabilityGrowthPanel
+        :data="capabilityGrowth"
+        :loading="capabilityGrowthLoading"
+        :error="capabilityGrowthError"
+        @retry="fetchCapabilityGrowth(currentUserId)"
+      />
+
+      <TeacherAssignments :user-id="currentUserId" @open-session="openTeacherAssignmentSession" />
 
       <div class="card bg-base-100 shadow-xl mt-6">
         <div class="card-body">
