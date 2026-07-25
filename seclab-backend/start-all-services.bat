@@ -12,22 +12,19 @@ REM
 REM Optional switches:
 REM   set START_LOCAL_USER_SERVICE=false   Use Docker user-service on 8081 instead.
 REM   set START_LOCAL_EXPERIMENT_MODULE_SERVICE=false   Use Docker experiment-module-service instead.
+REM   set START_LOCAL_IMAGE_SERVICE=false  Use Docker image-service instead of local Gradle bootRun on 8086.
 REM   set START_AI_AGENT=false             Do not start ai-agent-service on 8010.
-REM   set START_CPOLAR=true                Also open cpolar tunnel for ai-agent-service.
 
 if "%START_LOCAL_USER_SERVICE%"=="" set "START_LOCAL_USER_SERVICE=true"
 if "%START_LOCAL_EXPERIMENT_MODULE_SERVICE%"=="" set "START_LOCAL_EXPERIMENT_MODULE_SERVICE=true"
+if "%START_LOCAL_IMAGE_SERVICE%"=="" set "START_LOCAL_IMAGE_SERVICE=true"
 if "%START_AI_AGENT%"=="" set "START_AI_AGENT=true"
-if "%START_CPOLAR%"=="" set "START_CPOLAR=false"
 if "%USER_SERVICE_DB_HOST%"=="" set "USER_SERVICE_DB_HOST=127.0.0.1"
 if "%USER_SERVICE_DB_PORT%"=="" set "USER_SERVICE_DB_PORT=3306"
 if "%USER_SERVICE_DB_NAME%"=="" set "USER_SERVICE_DB_NAME=userservice"
 if "%USER_SERVICE_DB_USERNAME%"=="" set "USER_SERVICE_DB_USERNAME=seclab_app"
 if "%USER_SERVICE_DB_PASSWORD%"=="" set "USER_SERVICE_DB_PASSWORD=Seclab@123"
 if "%PROFILE_DB_NAME%"=="" set "PROFILE_DB_NAME=seclab_profile"
-
-set "CPOLAR_DIR=D:\cpolar"
-set "CPOLAR_EXE=%CPOLAR_DIR%\cpolar.exe"
 
 echo ========================================
 echo   SecLab all backend one-click startup
@@ -36,10 +33,10 @@ echo.
 echo Working directory: %CD%
 echo Local user-service mode: %START_LOCAL_USER_SERVICE%
 echo Local experiment-module-service mode: %START_LOCAL_EXPERIMENT_MODULE_SERVICE%
+echo Local image-service mode: %START_LOCAL_IMAGE_SERVICE%
 echo user-service DB: %USER_SERVICE_DB_HOST%:%USER_SERVICE_DB_PORT%/%USER_SERVICE_DB_NAME%
 echo profile DB:      %USER_SERVICE_DB_HOST%:%USER_SERVICE_DB_PORT%/%PROFILE_DB_NAME%
 echo AI Agent startup: %START_AI_AGENT%
-echo cpolar startup: %START_CPOLAR%
 echo.
 
 echo [1/12] Starting SQL injection lab on 8091...
@@ -80,11 +77,11 @@ if /I "%START_LOCAL_EXPERIMENT_MODULE_SERVICE%"=="true" (
     call :run_image_if_exists "saclab-experiment-module-service" "saclab-experiment-module-service" "8084:8084" "saclab-eureka" "EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://saclab-eureka:8761/eureka/"
 )
 
-echo [11/12] Starting image-service if available...
-if /I "%START_LOCAL_USER_SERVICE%"=="true" (
-    echo Skipping Docker image-service on 8083 because local user-service uses 8083.
+echo [11/12] Starting image-service...
+if /I "%START_LOCAL_IMAGE_SERVICE%"=="true" (
+    call :start_local_image_service
 ) else (
-    call :run_image_if_exists "saclab-image-service" "saclab-image-service" "8083:8083" "saclab-eureka" "EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://saclab-eureka:8761/eureka/"
+    call :run_image_if_exists "saclab-image-service" "saclab-image-service" "8086:8086" "saclab-eureka" "EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://saclab-eureka:8761/eureka/"
 )
 
 echo [12/12] Starting docker-service if image exists...
@@ -104,14 +101,6 @@ if /I "%START_AI_AGENT%"=="true" (
     call :start_ai_agent
 )
 
-if /I "%START_CPOLAR%"=="true" (
-    echo [extra] Starting cpolar tunnel to AI Agent 8010...
-    call :start_cpolar
-) else (
-    echo [extra] cpolar is not started by default.
-    echo         To start it too: set START_CPOLAR=true then run this script again.
-)
-
 echo.
 echo ========================================
 echo   Startup commands have been issued
@@ -120,6 +109,7 @@ echo.
 echo Core local backend:
 echo - user-service login/register: http://localhost:8083
 echo - experiment-module-service:   http://localhost:8084
+echo - image-service:               http://localhost:8086
 echo - Docker API for lab buttons:   http://localhost:3000/health
 echo - AI Agent service:            http://localhost:8010
 echo - AI Agent health:             http://localhost:8010/health
@@ -234,6 +224,25 @@ echo Waiting for experiment-module-service startup on http://localhost:8084 ...
 timeout /t 12 /nobreak >nul
 exit /b 0
 
+:start_local_image_service
+netstat -ano | findstr /R /C:":8086 .*LISTENING" >nul
+if not errorlevel 1 (
+    echo image-service already appears to be listening on 8086, skipping bootRun start.
+    exit /b 0
+)
+
+if not exist "%CD%\image-service\gradlew.bat" (
+    echo ERROR: image-service Gradle wrapper not found: %CD%\image-service\gradlew.bat
+    echo Image upload backend was NOT started.
+    exit /b 1
+)
+
+start "SecLab image-service 8086" /D "%CD%\image-service" cmd /k "set IMAGE_SERVICE_DB_HOST=%USER_SERVICE_DB_HOST%&& set IMAGE_SERVICE_DB_PORT=%USER_SERVICE_DB_PORT%&& set IMAGE_SERVICE_DB_USERNAME=%USER_SERVICE_DB_USERNAME%&& set IMAGE_SERVICE_DB_PASSWORD=%USER_SERVICE_DB_PASSWORD%&& .\gradlew.bat bootRun"
+echo Keep the "SecLab image-service 8086" window open.
+echo Waiting for image-service startup on http://localhost:8086 ...
+timeout /t 12 /nobreak >nul
+exit /b 0
+
 :start_docker_api
 netstat -ano | findstr /R /C:":3000 .*LISTENING" >nul
 if not errorlevel 1 (
@@ -274,23 +283,21 @@ if not exist "%CD%\ai-agent-service\main.py" (
     exit /b 0
 )
 
+REM Detect Python launcher: prefer "py" (Windows Python launcher), fall back to "python".
+set "PY_CMD=python"
+where py >nul 2>nul
+if not errorlevel 1 set "PY_CMD=py"
+
 if exist "%CD%\ai-agent-service\venv\Scripts\activate.bat" (
     start "SecLab AI Agent 8010" /D "%CD%\ai-agent-service" cmd /k "set MYSQL_HOST=%USER_SERVICE_DB_HOST%&& set MYSQL_PORT=%USER_SERVICE_DB_PORT%&& set MYSQL_USER=%USER_SERVICE_DB_USERNAME%&& set MYSQL_PASSWORD=%USER_SERVICE_DB_PASSWORD%&& set MYSQL_DATABASE=%PROFILE_DB_NAME%&& call venv\Scripts\activate.bat && python main.py"
 ) else if exist "%CD%\ai-agent-service\.venv\Scripts\activate.bat" (
     start "SecLab AI Agent 8010" /D "%CD%\ai-agent-service" cmd /k "set MYSQL_HOST=%USER_SERVICE_DB_HOST%&& set MYSQL_PORT=%USER_SERVICE_DB_PORT%&& set MYSQL_USER=%USER_SERVICE_DB_USERNAME%&& set MYSQL_PASSWORD=%USER_SERVICE_DB_PASSWORD%&& set MYSQL_DATABASE=%PROFILE_DB_NAME%&& call .venv\Scripts\activate.bat && python main.py"
 ) else (
-    start "SecLab AI Agent 8010" /D "%CD%\ai-agent-service" cmd /k "set MYSQL_HOST=%USER_SERVICE_DB_HOST%&& set MYSQL_PORT=%USER_SERVICE_DB_PORT%&& set MYSQL_USER=%USER_SERVICE_DB_USERNAME%&& set MYSQL_PASSWORD=%USER_SERVICE_DB_PASSWORD%&& set MYSQL_DATABASE=%PROFILE_DB_NAME%&& python main.py"
+    echo Installing/updating ai-agent-service dependencies via %PY_CMD% -m pip ...
+    "%PY_CMD%" -m pip install -r "%CD%\ai-agent-service\requirements.txt"
+    start "SecLab AI Agent 8010" /D "%CD%\ai-agent-service" cmd /k "set MYSQL_HOST=%USER_SERVICE_DB_HOST%&& set MYSQL_PORT=%USER_SERVICE_DB_PORT%&& set MYSQL_USER=%USER_SERVICE_DB_USERNAME%&& set MYSQL_PASSWORD=%USER_SERVICE_DB_PASSWORD%&& set MYSQL_DATABASE=%PROFILE_DB_NAME%&& %PY_CMD% main.py"
 )
 echo Keep the "SecLab AI Agent 8010" window open.
 timeout /t 3 /nobreak >nul
-exit /b 0
-
-:start_cpolar
-if not exist "%CPOLAR_EXE%" (
-    echo WARNING: cpolar not found: %CPOLAR_EXE%
-    exit /b 0
-)
-start "SecLab cpolar 8010" /D "%CPOLAR_DIR%" cmd /k ".\cpolar.exe http 8010"
-echo Copy the latest "Forwarding https://..." URL from the cpolar window for Dify.
 exit /b 0
 

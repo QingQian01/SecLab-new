@@ -4,10 +4,12 @@ SecLab AI Agent Service
   1. 将前端的聊天请求代理转发至 Dify Agent，并以 SSE 流式返回给前端
   2. 暴露 Docker 工具 HTTP API，供 Dify 通过外部 API 工具调用
 """
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 import httpx
@@ -17,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel, Field
-from typing import Optional, Any
+from typing import Optional, Any, List
 
 from config import DIFY_API_URL, DIFY_API_KEY, CORS_ORIGINS, SERVICE_HOST, SERVICE_PORT
 import docker_tools
@@ -71,6 +73,8 @@ from teacher_repository import (
     list_teacher_classes,
     read_teacher_dashboard,
 )
+import guidance_service
+import guidance_stream_registry
 
 
 class UTF8JSONResponse(JSONResponse):
@@ -225,6 +229,11 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = ""
     user: Optional[str] = "student"
     inputs: Optional[dict] = {}
+    # 出站模式：后端在转发给 Dify 前主动读取容器日志并拼进 query，
+    # 避免 Dify 云端回调本地工具（需要公网穿透）。
+    # 前端传入当前靶机容器名即可；不传则原样转发。
+    container_name: Optional[str] = None
+    log_tail: Optional[int] = 50
 
 
 class ExecRequest(BaseModel):
@@ -1953,13 +1962,34 @@ async def ingest_external_events(req: ExternalEventsIngestRequest):
 async def chat(req: ChatRequest):
     """
     接收前端消息，流式转发至 Dify Agent，并将 SSE 事件原样推送给前端。
+
+    出站模式：若前端传入 container_name，后端会先读取该容器最近日志并拼进 query，
+    这样 Dify Agent 在 prompt 中即可看到日志，无需回调本地 Docker 工具（不需要公网穿透）。
     """
+    # 出站模式：后端主动读容器日志拼进 query
+    enriched_query = req.query
+    if req.container_name:
+        tail = req.log_tail or 50
+        log_result = docker_tools.get_container_logs(req.container_name, tail=tail)
+        if log_result.get("success") and log_result.get("logs"):
+            enriched_query = (
+                f"{req.query}\n\n"
+                f"【系统附加：容器 {req.container_name} 最近 {tail} 行日志】\n"
+                f"{log_result['logs']}\n"
+                f"（以上日志由后端自动附加，请直接基于日志内容回答，无需再调用工具读取日志。）"
+            )
+        elif not log_result.get("success"):
+            enriched_query = (
+                f"{req.query}\n\n"
+                f"【系统提示：读取容器 {req.container_name} 日志失败 - {log_result.get('error', '未知错误')}】"
+            )
+
     headers = {
         "Authorization": f"Bearer {DIFY_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
-        "query": req.query,
+        "query": enriched_query,
         "response_mode": "streaming",
         "conversation_id": req.conversation_id or "",
         "user": req.user or "student",
@@ -2059,6 +2089,127 @@ async def stop_container(
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["error"])
     return result
+
+
+# ─────────────────────────────────────────
+#  Proactive Guidance 信号中枢
+#  - POST /api/guidance/signal   供 docker-service 检测到挫败指数超阈值时调用
+#  - GET  /api/guidance/stream/{lab_session_id}  前端 SSE 订阅，实时接收启发式诊断
+# ─────────────────────────────────────────
+
+_guidance_logger = logging.getLogger("guidance")
+
+
+class GuidanceSignalRequest(BaseModel):
+    """docker-service FrustrationTracker 触发后发来的信号体。
+
+    字段对齐 Kotlin 端 ``GuidanceSignalClient`` 构造的 JSON（见
+    ``docker-service/.../GuidanceSignalClient.kt``）。
+    所有字段除 ``trigger_reason`` 外都可为空，由 ``guidance_service.handle_signal`` 兜底。
+    """
+
+    signal_id: Optional[str] = None
+    lab_session_id: Optional[str] = None
+    user_id: Optional[Any] = None  # 可能是 int 或字符串
+    class_id: Optional[Any] = None
+    course_id: Optional[Any] = None
+    module_id: Optional[Any] = None
+    task_id: Optional[Any] = None
+    container_name: Optional[str] = None
+    lab_key: Optional[str] = None
+    trigger_reason: str = ""
+    error_slice: Optional[str] = None
+    exit_code: Optional[int] = None
+    recent_commands: Optional[List[Any]] = None
+    lab_task_summary: Optional[str] = None
+    frustration_score: int = 0
+    triggered_at: Optional[str] = None
+    locale: Optional[str] = "zh-CN"
+    request_id: Optional[str] = None
+
+
+@app.post(
+    "/api/guidance/signal",
+    status_code=202,
+    summary="接收 docker-service 的 proactive guidance 信号",
+)
+async def receive_guidance_signal(
+    signal: GuidanceSignalRequest,
+    _: None = Security(verify_tool_key),
+):
+    """
+    接收 docker-service 发来的挫败指数触发信号。
+
+    - 同步预处理（分类错误、落 error_event、ensure 会话）后立即返回 202。
+    - Dify 流式调用在 ``asyncio.create_task`` 后台执行，结果通过
+      ``GET /api/guidance/stream/{lab_session_id}`` 推送给前端订阅者。
+    - 无订阅者时跳过 Dify 调用（节省成本）。
+    """
+    signal_dict = signal.model_dump()
+    try:
+        result = guidance_service.dispatch_signal_task(signal_dict)
+        _guidance_logger.info(
+            "guidance signal accepted signal_id=%s lab_session_id=%s subscribers=%d",
+            result.get("signal_id"),
+            signal_dict.get("lab_session_id"),
+            result.get("subscriber_count"),
+        )
+        return JSONResponse(status_code=202, content=result)
+    except Exception as exc:
+        _guidance_logger.exception("guidance signal dispatch failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"信号处理失败：{exc.__class__.__name__}",
+        )
+
+
+@app.get(
+    "/api/guidance/stream/{lab_session_id}",
+    summary="前端 SSE 订阅 proactive guidance 事件流",
+)
+async def stream_guidance_events(lab_session_id: str):
+    """
+    SSE 订阅指定 ``lab_session_id`` 的 guidance 事件流。
+
+    事件类型（``data:`` 行内 JSON 的 ``type`` 字段）：
+    - ``guidance_start``：开始生成启发式诊断
+    - ``chunk``：Dify 流式回答的增量文本（``content`` 字段）
+    - ``error``：内部错误或 Dify 调用失败（``message`` 字段）
+    - ``guidance_end``：本次诊断结束（含 ``message_id`` / ``conversation_id``）
+
+    无鉴权：前端在打开靶机页面时即可订阅，等待信号触发后实时收到诊断。
+    """
+    _guidance_logger.info(
+        "guidance SSE subscriber connected lab_session_id=%s", lab_session_id
+    )
+
+    async def event_stream():
+        try:
+            # 立即发送一次 ready 事件，让前端确认订阅成功
+            ready_event = {
+                "type": "ready",
+                "lab_session_id": lab_session_id,
+                "ts": datetime.utcnow().isoformat(),
+            }
+            yield f"data: {json.dumps(ready_event, ensure_ascii=False)}\n\n"
+
+            async for event in guidance_stream_registry.subscribe(lab_session_id):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            _guidance_logger.info(
+                "guidance SSE subscriber disconnected lab_session_id=%s",
+                lab_session_id,
+            )
+            raise
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲，保证 SSE 实时性
+        },
+    )
 
 
 # ─────────────────────────────────────────

@@ -205,6 +205,59 @@ docker-compose up -d
 docker logs -f seclab-ai-agent
 ```
 
+#### 4.4.4 Proactive Guidance 全域智能引导配置（可选）
+
+全域智能引导助手通过 WebSocket 旁路监听终端输出与代码报错，构建"数据拦截-状态评估-动态反馈"闭环。当 `docker-service` 的 `FrustrationTracker` 检测到学生挫败指数超阈值时，会向 `ai-agent-service` 发送信号，由后者调用 Dify 生成启发式诊断并通过 SSE 推送到前端。
+
+**ai-agent-service 环境变量**（在 `.env` 中配置）：
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `DIFY_API_KEY` | （必填） | Dify 应用的 API Key |
+| `DIFY_API_URL` | `https://api.dify.ai/v1` | Dify API 基址 |
+| `DIFY_GUIDANCE_USER` | `guidance-proactive` | Proactive guidance 调用 Dify 时使用的 user 标识 |
+| `DIFY_GUIDANCE_TIMEOUT` | `120` | Dify 流式调用超时（秒） |
+| `TOOL_API_KEY` | （空） | 内部接口鉴权密钥；为空时放行。需与 `docker-service` 的 `seclab.agent.signal-token` 保持一致 |
+
+**docker-service 配置**（`application.yml`）：
+
+```yaml
+seclab:
+  frustration:
+    threshold: 3              # 挫败指数触发阈值
+    cooldown-seconds: 90      # 两次触发间的冷却时间
+    repeat-window-seconds: 300
+    state-ttl-minutes: 30
+  agent:
+    signal-url: http://localhost:8010/api/guidance/signal
+    signal-token: ${TOOL_API_KEY}   # 与 ai-agent-service 的 TOOL_API_KEY 一致
+    timeout-ms: 5000
+```
+
+**部署约束**：
+
+- **单 worker 约束**：`ai-agent-service` 的 guidance SSE 广播使用进程内 `asyncio.Queue`，仅支持单 uvicorn worker。多 worker 部署需改用 Redis Pub/Sub（当前未实现）。
+  - 开发模式 `python main.py`（`reload=True`）默认单 worker，无需额外配置。
+  - 生产模式 `uvicorn main:app --workers 1`（**必须 `--workers 1`**）。
+- **CORS**：前端通过 `VITE_AGENT_BASE_URL` 直连 ai-agent-service（不走 vite 代理），需确保 `CORS_ORIGINS` 包含前端 origin（如 `http://localhost:5173`）。
+- **Dify 应用**：需在 Dify 云端预先创建应用，并配置 `error_slice` / `recent_commands` / `lab_task_summary` 等输入变量。
+
+**验证**：
+
+```bash
+# 1. 检查 ai-agent-service 端点已注册
+curl http://localhost:8010/openapi.json | python -m json.tool | findstr guidance
+
+# 2. 检查 SSE 订阅端点（应返回 200 + text/event-stream）
+curl -N http://localhost:8010/api/guidance/stream/test-session
+
+# 3. 模拟 docker-service 发送信号（需替换 TOOL_API_KEY）
+curl -X POST http://localhost:8010/api/guidance/signal ^
+  -H "Content-Type: application/json" ^
+  -H "X-SecLab-Token: %TOOL_API_KEY%" ^
+  -d "{\"signal_id\":\"sig-test\",\"lab_session_id\":\"test-session\",\"trigger_reason\":\"repeated_error\",\"error_slice\":\"permission denied\"}"
+```
+
 方式三：本机一键启动 AI Agent + cpolar
 
 ```bash
@@ -307,6 +360,20 @@ docker exec -i seclab-mysql mysql -uroot -pseclab123 seclab_db < ./database/sql/
 docker exec -i sqli-lab_db_1 mysql -uroot -p123456 sqli_lab < ./seclab-backend/sqli-lab/init.sql
 ```
 
+#### 4.6.3 导入画像与 AI 会话数据库
+
+```bash
+# 画像库（含 error_event / ai_conversation / ai_message / guidance_proactive_notes 等表）
+docker exec -i seclab-mysql mysql -uroot -pseclab123 < ./database/sql/init_seclab_profile.sql
+
+# 如需单独初始化 proactive guidance 主动提示历史表，可执行：
+docker exec -i seclab-mysql mysql -uroot -pseclab123 < ./shujuku/guidance_proactive_notes.sql
+```
+
+> **说明**：`init_seclab_profile.sql` 已包含 `guidance_proactive_notes` 表的建表语句，
+> 正常部署无需单独执行 `shujuku/guidance_proactive_notes.sql`。
+> 后端 `ai-agent-service` 启动时也会通过 `ensure_guidance_schema()` 自愈建表。
+
 ## 5. 服务访问
 
 ### 5.1 本地访问
@@ -401,6 +468,12 @@ docker stop $(docker ps -q)
   - 时间耗尽时提供完整解答
 - **工具调用能力**：支持获取容器状态、读取日志、执行命令、停止容器等操作
 - **内网穿透支持**：通过 cpolar 实现公网访问，便于远程调试和协作
+- **全域智能引导（Proactive Guidance）**：
+  - **挫败指数追踪**：`docker-service` 的 `FrustrationTracker` 实时分析终端输出与命令执行，按"同 signature 重复错误 +2 / 重复命令 +1"规则累计分数，超阈值（默认 3）触发信号
+  - **启发式诊断**：信号到达 `ai-agent-service` 后，结合错误切片与靶机任务上下文调用 Dify RAG 生成启发式（非直接答案）诊断
+  - **SSE 实时推送**：诊断结果通过 `/api/guidance/stream/{lab_session_id}` 流式推送到前端，FloatingChat 中以"主动提示"徽标渲染
+  - **未读徽标**：FloatingChatButton 显示未读主动提示计数，打开聊天即标记已读
+  - **历史回溯**：所有主动提示落 `guidance_proactive_notes` 表，可按 `lab_session_id` / `user_id` 查询
 
 ### 8.4 管理功能
 

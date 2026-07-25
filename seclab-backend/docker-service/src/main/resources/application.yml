@@ -17,3 +17,25 @@ eureka:
 logging:
   level:
     org.springframework.web: debug
+
+seclab:
+  docker:
+    # Docker daemon host; 留空则按平台默认（Linux: unix:///var/run/docker.sock, Windows: npipe:////./pipe/docker_engine）
+    # 也可通过环境变量 DOCKER_HOST 覆盖
+    host: ${DOCKER_HOST:}
+  frustration:
+    # 挫败指数触发阈值（分数 >= threshold 即触发 AI 主动提示）
+    threshold: 3
+    # 同一 sessionKey 两次触发之间的冷却时间（秒）
+    cooldown-seconds: 90
+    # 重复命令计数的时间窗口（秒）
+    repeat-window-seconds: 300
+    # FrustrationState 在内存中的存活时间（无更新则驱逐，避免无界增长）
+    state-ttl-minutes: 30
+  agent:
+    # ai-agent-service 的信号接收端点
+    signal-url: ${AGENT_SIGNAL_URL:http://localhost:8010/api/guidance/signal}
+    # 共享密钥（与 ai-agent-service 的 TOOL_API_KEY 保持一致；留空则不鉴权）
+    signal-token: ${AGENT_SIGNAL_TOKEN:}
+    # 信号发送 HTTP 超时（毫秒）
+    timeout-ms: 5000

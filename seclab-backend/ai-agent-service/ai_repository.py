@@ -427,3 +427,81 @@ def save_tool_calls(
                     },
                 )
         conn.commit()
+
+
+def ensure_guidance_conversation(
+    *,
+    lab_session_id: str,
+    context: dict[str, Any],
+    source: str = "guidance-proactive",
+) -> dict[str, Any]:
+    """
+    为 proactive guidance 信号查找或创建本地会话。
+
+    - 按 ``lab_session_id + source='guidance-proactive'`` 查找；找到则 UPDATE last_message_at。
+    - 未找到则 INSERT 固定 ``conversation_id = f"guidance-{lab_session_id}"``，``dify_conversation_id=NULL``。
+    - **不修改 ``dify_conversation_id`` 列**，避免 UNIQUE 约束冲突（评审 Q3）。
+    - 首次 Dify 调用后由 :func:`update_conversation_after_stream` 回填真实 ``dify_conversation_id``。
+
+    Returns: ``{"conversation_id": str, "dify_conversation_id": Optional[str]}``
+    """
+    ensure_ai_schema()
+    now = datetime.utcnow()
+    fixed_id = f"guidance-{lab_session_id}"
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT conversation_id, dify_conversation_id
+                FROM ai_conversation
+                WHERE lab_session_id = %(lab_session_id)s AND source = %(source)s
+                LIMIT 1
+                """,
+                {"lab_session_id": lab_session_id, "source": source},
+            )
+            row = cursor.fetchone()
+            if row:
+                cursor.execute(
+                    """
+                    UPDATE ai_conversation
+                    SET user_id = COALESCE(%(user_id)s, user_id),
+                        class_id = COALESCE(%(class_id)s, class_id),
+                        course_id = COALESCE(%(course_id)s, course_id),
+                        module_id = COALESCE(%(module_id)s, module_id),
+                        task_id = COALESCE(%(task_id)s, task_id),
+                        last_message_at = %(now)s,
+                        status = 'active'
+                    WHERE conversation_id = %(conversation_id)s
+                    """,
+                    {**context, "conversation_id": row["conversation_id"], "now": now},
+                )
+                conn.commit()
+                return {
+                    "conversation_id": row["conversation_id"],
+                    "dify_conversation_id": row.get("dify_conversation_id"),
+                }
+
+            cursor.execute(
+                """
+                INSERT INTO ai_conversation (
+                    conversation_id, user_id, class_id, course_id, module_id,
+                    task_id, lab_session_id, dify_conversation_id,
+                    status, source, start_time, last_message_at
+                ) VALUES (
+                    %(conversation_id)s, %(user_id)s, %(class_id)s, %(course_id)s,
+                    %(module_id)s, %(task_id)s, %(lab_session_id)s, NULL,
+                    'active', %(source)s, %(now)s, %(now)s
+                )
+                """,
+                {
+                    **context,
+                    "conversation_id": fixed_id,
+                    "lab_session_id": lab_session_id,
+                    "source": source,
+                    "now": now,
+                },
+            )
+        conn.commit()
+
+    return {"conversation_id": fixed_id, "dify_conversation_id": None}

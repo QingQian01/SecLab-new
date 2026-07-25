@@ -183,6 +183,10 @@ const showNoVNC = ref(false)
 const isOperationMachineRunning = ref(false)
 const isTargetMachineRunning = ref(false)
 
+// noVNC 操作环境桌面地址，可通过环境变量配置
+const NOVNC_URL = import.meta.env.VITE_NOVNC_URL || 'http://127.0.0.1:8443'
+const operationMachineError = ref('')
+
 // 添加加载状态
 const isTargetLoading = ref(false)
 
@@ -339,9 +343,16 @@ const toggleOperationMachine = async () => {
   if (!isOperationMachineRunning.value) {
     // 启动操作环境
     isOperationLoading.value = true
+    operationMachineError.value = ''
 
-    // 模拟启动延迟
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    // 检查 noVNC 服务是否可访问
+    try {
+      await axios.get(NOVNC_URL, { timeout: 5000 })
+    } catch {
+      operationMachineError.value = `操作环境桌面 (${NOVNC_URL}) 无法连接。请确认 noVNC 容器已启动。`
+      isOperationLoading.value = false
+      return
+    }
 
     isOperationMachineRunning.value = true
     activeEnvironmentTab.value = 'operation'
@@ -349,6 +360,7 @@ const toggleOperationMachine = async () => {
   } else {
     // 关闭操作环境
     isOperationMachineRunning.value = false
+    operationMachineError.value = ''
     if (activeEnvironmentTab.value === 'operation') {
       activeEnvironmentTab.value = isTargetMachineRunning.value ? 'target' : null
     }
@@ -1098,7 +1110,7 @@ const calculatePoints = computed(() => {
   const difficultyPoints = experiment.value.difficulty * 30
 
   // 时间加成：每小时10分（最长5小时，最高50分）
-  const totalHours = experiment.value.taskPoints.reduce((total, task) => {
+  const totalHours = (experiment.value.taskPoints || []).reduce((total, task) => {
     return total + task.score / 10 // 假设每10分的任务需要1小时
   }, 0)
   // 限制最大计算时长为5小时
@@ -1211,7 +1223,7 @@ const discussions = ref([
 // 在新窗口打开环境
 const openInNewWindow = (type: 'operation' | 'target') => {
   if (type === 'operation') {
-    window.open('http://127.0.0.1:8443', '_blank');
+    window.open(NOVNC_URL, '_blank');
   } else if (type === 'target' && targetMachineUrl.value) {
     // 确保URL有效
     if (targetMachineUrl.value) {
@@ -1734,7 +1746,7 @@ const copyToClipboard = (text: string) => {
           <!-- 操作环境iframe -->
           <div v-if="activeEnvironmentTab === 'operation'" class="w-full h-[calc(100%-50px)]">
             <div v-if="isOperationMachineRunning" class="w-full h-full">
-              <iframe src="http://127.0.0.1:8443" class="w-full h-full border-none"></iframe>
+              <iframe :src="NOVNC_URL" class="w-full h-full border-none"></iframe>
             </div>
             <div v-else class="flex flex-col items-center justify-center h-full p-4 text-center">
               <div class="text-6xl text-base-content/20 mb-4">
@@ -1744,6 +1756,10 @@ const copyToClipboard = (text: string) => {
               <p class="text-base-content/70 mb-4">
                 请先启动操作环境
               </p>
+              <div v-if="operationMachineError" class="alert alert-error mb-4 text-sm">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>{{ operationMachineError }}</span>
+              </div>
               <button class="btn btn-primary btn-sm" @click="toggleOperationMachine" :disabled="isOperationLoading">
                 <span class="loading loading-spinner loading-xs" v-if="isOperationLoading"></span>
                 <i class="fas fa-play mr-1" v-else></i>

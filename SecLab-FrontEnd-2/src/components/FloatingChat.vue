@@ -85,6 +85,25 @@
                 </div>
               </div>
               <div class="chat-bubble assistant-bubble p-0 text-xs">
+                <!-- ── Phase 3: proactive guidance 主动提示标记 ─────────── -->
+                <div
+                  v-if="message.isGuidance"
+                  class="px-2 pt-2 pb-1 bg-gradient-to-r from-secondary/15 to-primary/15 border-b border-secondary/20"
+                >
+                  <div class="flex items-center gap-1.5 text-xs text-secondary font-medium">
+                    <i class="fas fa-lightbulb"></i>
+                    <span>主动提示</span>
+                    <span class="ml-auto text-base-content/50 font-normal">
+                      {{ message.trigger_reason === 'repeated_error' ? '重复错误' :
+                         message.trigger_reason === 'stuck_loop' ? '卡循环' :
+                         message.trigger_reason === 'repeated_command' ? '重复命令' : message.trigger_reason }}
+                    </span>
+                    <span
+                      v-if="message.guidance_status === 'streaming'"
+                      class="loading loading-spinner loading-xs text-secondary"
+                    ></span>
+                  </div>
+                </div>
                 <!-- ── 工具调用可视化卡片 ─────────────────────── -->
                 <div
                   v-if="message.toolCalls && message.toolCalls.length > 0"
@@ -232,9 +251,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch, computed } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
-import { currentLabContext } from '../composables/useLabState'
+import { currentLabContext, guidanceAlerts, markGuidanceAlertsRead, type GuidanceAlert } from '../composables/useLabState'
 import { reportLearningEvent } from '../api'
 
 // Dify SSE 事件类型
@@ -269,6 +288,11 @@ interface Message {
   isStreaming?: boolean
   showThinking?: boolean
   toolCalls?: ToolCall[]  // 该消息产生的工具调用列表
+  // Phase 3: proactive guidance 主动提示字段
+  isGuidance?: boolean
+  signal_id?: string          // 关联 guidanceAlerts 中的 signal_id
+  trigger_reason?: string     // repeated_error / stuck_loop / repeated_command
+  guidance_status?: 'streaming' | 'done' | 'error'
 }
 
 const props = defineProps({
@@ -484,6 +508,13 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
   let completeThinking = ''
 
   try {
+    // 出站模式：把当前靶机容器名传给后端，后端读日志拼进 query，
+    // 避免 Dify 云端回调本地工具（需要公网穿透）
+    const containerName = currentLabContext.value.containerName
+      || currentLabContext.value.currentLabContainer
+      || props.labContainer
+      || ''
+
     const response = await fetch(`${AGENT_BASE_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -491,7 +522,9 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
         query: userQuestion,
         conversation_id: conversationId.value,
         user: 'student',
-        inputs: {}
+        inputs: {},
+        container_name: containerName || null,
+        log_tail: 50
       })
     })
 
@@ -742,26 +775,71 @@ const loadMessagesFromStorage = () => {
   }
 }
 
+// ── Phase 3: Proactive Guidance 同步到消息列表 ───────────────
+/**
+ * 把 guidanceAlerts 同步到 messages 数组：
+ * - 新 alert → push assistant message（isGuidance=true）
+ * - 已存在 alert（按 signal_id 匹配）→ 更新 content/streamContent/isStreaming/guidance_status
+ * 找不到匹配 alert 的 guidance 消息保留（用户可手动滚动查看历史）。
+ */
+function syncGuidanceAlertsToMessages() {
+  for (const alert of guidanceAlerts.value) {
+    const existingIdx = messages.value.findIndex(
+      (m) => m.isGuidance && m.signal_id === alert.signal_id
+    )
+    if (existingIdx === -1) {
+      // 新 alert → push 新消息
+      messages.value.push({
+        role: 'assistant',
+        content: alert.content,
+        streamContent: alert.content,
+        timestamp: new Date(alert.started_at),
+        isStreaming: alert.status === 'streaming',
+        isGuidance: true,
+        signal_id: alert.signal_id,
+        trigger_reason: alert.trigger_reason,
+        guidance_status: alert.status,
+      })
+    } else {
+      // 已存在 → 原地更新（保留 timestamp）
+      const msg = messages.value[existingIdx]
+      msg.content = alert.content
+      msg.streamContent = alert.content
+      msg.isStreaming = alert.status === 'streaming'
+      msg.guidance_status = alert.status
+      if (alert.status === 'error' && alert.error_message) {
+        msg.content = `⚠️ ${alert.error_message}`
+      }
+    }
+  }
+  nextTick(() => scrollToBottom())
+}
+
 // 组件挂载
 onMounted(() => {
   // 加载聊天记录
   loadMessagesFromStorage()
-  
+
+  // Phase 3: 同步已累积的 guidance 主动提示到消息列表
+  syncGuidanceAlertsToMessages()
+  // 打开聊天即标记已读（FloatingChatButton 徽标归零）
+  markGuidanceAlertsRead()
+
   // 聚焦输入框
   if (!isMinimized.value) {
     inputField.value?.focus()
   }
-  
+
   // 监听窗口大小变化，确保悬浮窗不超出视口
   window.addEventListener('resize', () => {
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
     const chatElement = document.querySelector('.floating-chat') as HTMLElement
-    
+
     if (chatElement) {
       const width = chatElement.offsetWidth
       const height = chatElement.offsetHeight
-      
+
       position.value = {
         x: Math.min(position.value.x, viewportWidth - width),
         y: Math.min(position.value.y, viewportHeight - height)
@@ -769,6 +847,11 @@ onMounted(() => {
     }
   })
 })
+
+// Phase 3: guidanceAlerts 变化时实时同步到消息列表（聊天打开期间）
+watch(guidanceAlerts, () => {
+  syncGuidanceAlertsToMessages()
+}, { deep: true })
 </script>
 
 <style scoped>

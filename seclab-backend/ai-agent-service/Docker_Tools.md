@@ -4,8 +4,8 @@ info:
   description: 管理 SecLab 靶场 Docker 容器的工具集。支持获取日志、执行指令、启动和停止容器。
   version: 1.1.0
 servers:
-  - url: https://56f08634.r9.cpolar.top
-    description: cpolar 公网穿透地址
+  - url: https://39cab806.r9.cpolar.top
+    description: cpolar 公网穿透地址（免费隧道，每次重启 cpolar 会换地址，需同步更新 Dify 工具配置里的 server URL）
 paths:
   # --- 新增：获取容器列表（读取容器名字） ---
   /api/docker/list:

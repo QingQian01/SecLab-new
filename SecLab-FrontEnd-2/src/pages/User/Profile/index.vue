@@ -12,6 +12,8 @@ import {
   getTrainingQuestions,
   getUserInfo,
   getUserTrainingSessions,
+  image as resolveImage,
+  uploadImageFile,
   type ProfileRecommendationItem,
   submitGeneratedQuestionAnswer,
   submitTrainingAnswer,
@@ -176,6 +178,12 @@ const learningHours = ref(0)
 const isLoadingUserData = ref(false)
 const isEditing = ref(false)
 const showProfileModal = ref(false)
+
+// 头像上传相关状态
+const avatarFile = ref<File | null>(null)
+const avatarPreviewUrl = ref('')
+const isUploadingAvatar = ref(false)
+const avatarError = ref('')
 const isLoading = ref(false)
 const isLoaded = ref(false)
 
@@ -407,8 +415,8 @@ function hasMeaningfulLatestProfile(profile: ProfileLatestResponse | null) {
 }
 
 const displayUserImage = computed(() => {
-  const image = user.value.userImage?.trim()
-  return image || ''
+  const img = user.value.userImage?.trim()
+  return img ? resolveImage(img) : ''
 })
 
 const currentUserId = computed(() => user.value.userId || 0)
@@ -1513,12 +1521,18 @@ async function submitQuestion(question: TrainingQuestionViewModel) {
 
 const openProfileModal = () => {
   editedUser.value = { ...user.value }
+  avatarFile.value = null
+  avatarPreviewUrl.value = ''
+  avatarError.value = ''
   showProfileModal.value = true
 }
 
 const closeProfileModal = () => {
   showProfileModal.value = false
   isEditing.value = false
+  avatarFile.value = null
+  avatarPreviewUrl.value = ''
+  avatarError.value = ''
 }
 
 const startEdit = () => {
@@ -1528,7 +1542,39 @@ const startEdit = () => {
 const cancelEdit = () => {
   isEditing.value = false
   editedUser.value = { ...user.value }
+  avatarFile.value = null
+  avatarPreviewUrl.value = ''
+  avatarError.value = ''
 }
+
+// 选择头像文件并预览
+const onAvatarChange = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  avatarError.value = ''
+
+  if (!file) return
+
+  // 校验文件类型和大小
+  if (!file.type.startsWith('image/')) {
+    avatarError.value = '请选择图片文件'
+    return
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    avatarError.value = '图片大小不能超过 5MB'
+    return
+  }
+
+  avatarFile.value = file
+  avatarPreviewUrl.value = URL.createObjectURL(file)
+}
+
+// 模态框中显示的头像预览
+const modalAvatarSrc = computed(() => {
+  if (avatarPreviewUrl.value) return avatarPreviewUrl.value
+  const img = editedUser.value.userImage?.trim()
+  return img ? resolveImage(img) : ''
+})
 
 async function saveEdit() {
   isLoading.value = true
@@ -1539,6 +1585,25 @@ async function saveEdit() {
       return
     }
 
+    // 如果选择了新头像，先上传到 image-service
+    if (avatarFile.value) {
+      isUploadingAvatar.value = true
+      try {
+        const uploadResult = await uploadImageFile(avatarFile.value)
+        const uploadedUrl = uploadResult.url || uploadResult.filename || ''
+        if (uploadedUrl) {
+          editedUser.value.userImage = uploadedUrl
+        }
+      } catch (uploadErr) {
+        console.error('头像上传失败:', uploadErr)
+        showToast('头像上传失败，请稍后重试')
+        isUploadingAvatar.value = false
+        return
+      } finally {
+        isUploadingAvatar.value = false
+      }
+    }
+
     const response = await updateUserInfoByToken(editedUser.value, token)
     if (response?.data) {
       const image = response.data.userImage?.trim() || ''
@@ -1546,6 +1611,8 @@ async function saveEdit() {
       editedUser.value = { ...user.value }
     }
 
+    avatarFile.value = null
+    avatarPreviewUrl.value = ''
     isEditing.value = false
     showProfileModal.value = false
     showToast('保存成功')
@@ -2712,6 +2779,59 @@ onMounted(() => {
           <i class="fas fa-user-edit text-primary"></i>
           个人基本信息
         </h3>
+
+        <!-- 头像上传区域 -->
+        <div class="flex items-center gap-6 mb-8 pb-6 border-b border-base-300">
+          <div class="relative group">
+            <div class="w-24 h-24 rounded-full ring-4 ring-primary/30 shadow-lg bg-base-200 flex items-center justify-center overflow-hidden">
+              <img
+                v-if="modalAvatarSrc"
+                :src="modalAvatarSrc"
+                alt="头像预览"
+                class="w-full h-full object-cover"
+              />
+              <i v-else class="fas fa-user text-4xl text-base-content/30"></i>
+            </div>
+          </div>
+          <div class="flex-1">
+            <label class="label">
+              <span class="label-text font-medium">头像</span>
+            </label>
+            <div class="flex items-center gap-3">
+              <label
+                v-if="isEditing"
+                class="btn btn-sm btn-outline gap-2 cursor-pointer"
+                :class="{ 'btn-disabled': isUploadingAvatar }"
+              >
+                <span v-if="isUploadingAvatar" class="loading loading-spinner loading-xs"></span>
+                <i v-else class="fas fa-upload"></i>
+                <span>{{ isUploadingAvatar ? '上传中...' : '选择图片' }}</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+                  class="hidden"
+                  @change="onAvatarChange"
+                  :disabled="isUploadingAvatar"
+                />
+              </label>
+              <button
+                v-if="isEditing && avatarFile"
+                class="btn btn-ghost btn-sm"
+                @click="avatarFile = null; avatarPreviewUrl = ''"
+              >
+                <i class="fas fa-times"></i>
+                取消
+              </button>
+            </div>
+            <div v-if="avatarError" class="alert alert-error mt-2 py-2 text-sm">
+              <i class="fas fa-exclamation-circle"></i>
+              <span>{{ avatarError }}</span>
+            </div>
+            <p v-else-if="isEditing" class="text-xs text-base-content/60 mt-1">
+              支持 PNG/JPG/GIF/WebP，最大 5MB
+            </p>
+          </div>
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
           <div

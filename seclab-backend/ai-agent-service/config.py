@@ -39,9 +39,11 @@ configured_cors_origins = [
 CORS_ORIGINS = list(dict.fromkeys(configured_cors_origins + DEFAULT_CORS_ORIGINS))
 
 # Docker tool container name allowlist
+# 前缀需与靶场目录名保持一致，例如 command-inject/ 目录对应容器 command-inject-web-1
+# 注意：不要使用 cmd 这种简写，cmd 既不是 command-inject 的前缀也不是子串，会导致白名单误拒
 ALLOWED_CONTAINER_PREFIXES = os.getenv(
     "ALLOWED_CONTAINER_PREFIXES",
-    "sqli,xss,csrf,upload,dir,cmd,sec-code",
+    "sqli,xss,csrf,upload,dir,command-inject,sec-code",
 ).split(",")
 
 # Maximum log lines returned by Docker tools

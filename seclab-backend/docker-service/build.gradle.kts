@@ -22,9 +22,12 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.apache.httpcomponents.core5:httpcore5-h2:5.3.4")
     implementation("com.github.docker-java:docker-java-core:3.4.2")
     implementation("com.github.docker-java:docker-java-transport-zerodep:3.4.2")
+    implementation("org.springframework.boot:spring-boot-starter-websocket")
+    implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
     implementation("org.springframework.cloud:spring-cloud-starter-netflix-eureka-client")
     // 测试依赖
     testImplementation("org.springframework.boot:spring-boot-starter-test")

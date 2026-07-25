@@ -4,4 +4,17 @@ spring:
 
 # 注意: 这个配置只用于测试环境
 # 如果要运行集成测试，请确保有一个可用的Docker守护进程
-# 如果没有，集成测试将被跳过 
+# 如果没有，集成测试将被跳过
+
+seclab:
+  docker:
+    host: unix:///var/run/docker.sock
+  frustration:
+    threshold: 3
+    cooldown-seconds: 90
+    repeat-window-seconds: 300
+    state-ttl-minutes: 30
+  agent:
+    signal-url: http://localhost:8010/api/guidance/signal
+    signal-token: ""
+    timeout-ms: 5000

@@ -1,4 +1,4 @@
-﻿import axios from "axios";
+import axios from "axios";
 import type { RegisterForm } from "./types/auth";
 import { getStoredToken } from "./auth";
 import type { User } from "./types/user";
@@ -23,7 +23,7 @@ const DOCKER_API_URL = import.meta.env.VITE_DOCKER_API_URL || "http://localhost:
 const AGENT_BASE_URL = import.meta.env.VITE_AGENT_BASE_URL || "http://localhost:8010";
 
 const BASE_URL: string = API_BASE_URL;
-const IMAGE_URL = `${BASE_URL}/images/view/`;
+const IMAGE_URL = `${IMAGE_SERVICE_BASE_URL}/files/`;
 
 type Result<T> = {
     isSuccess:number,
@@ -1050,7 +1050,7 @@ export async function uploadImageFile(file: File): Promise<ImageUploadResponse> 
     if (data.url && !data.url.startsWith("http://") && !data.url.startsWith("https://")) {
         data.url = new URL(data.url, IMAGE_SERVICE_BASE_URL).toString();
     } else if (!data.url && data.filename) {
-        data.url = `${IMAGE_SERVICE_BASE_URL}/view/${encodeURIComponent(data.filename)}`;
+        data.url = `${IMAGE_SERVICE_BASE_URL}/files/${encodeURIComponent(data.filename)}`;
     }
     return data;
 }
@@ -1060,12 +1060,18 @@ export let image = (imageName: string | null | undefined) => {
     if (!imageName) {
         return '/default-course-image.png'; // 默认图片路径
     }
-    
+
     // 如果已经是完整URL，直接返回
     if (imageName.startsWith('http://') || imageName.startsWith('https://')) {
-        return imageName;
+        // 兼容历史数据：旧路径 /api/images/view/ 修正为 /api/images/files/
+        return imageName.replace('/api/images/view/', '/api/images/files/');
     }
-    
+
+    // image-service 上传的图片（avatar_xxx.png）通过 image-service 的 files 接口访问
+    if (imageName.startsWith('avatar_')) {
+        return `${IMAGE_SERVICE_BASE_URL}/files/${encodeURIComponent(imageName)}`;
+    }
+
     // 如果是本地文件路径，直接从public目录加载
     if (imageName.startsWith('/') || imageName.includes('.png') || imageName.includes('.jpg') || imageName.includes('.jpeg') || imageName.includes('.svg')) {
         // 尝试从public目录加载
@@ -1074,7 +1080,7 @@ export let image = (imageName: string | null | undefined) => {
             const fileName = imageName.includes('-') ? imageName.split('-').pop() : imageName;
             // 如果文件名包含路径分隔符，只取最后一部分
             const cleanFileName = fileName?.includes('/') ? fileName.split('/').pop() : fileName;
-            
+
             if (cleanFileName) {
                 return `/${cleanFileName}`;
             }
@@ -1082,7 +1088,7 @@ export let image = (imageName: string | null | undefined) => {
             console.warn('处理图片路径出错:', e);
         }
     }
-    
+
     // 拼接后端图片URL
     return IMAGE_URL + imageName;
 };
@@ -1840,7 +1846,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "SQL注入攻击",
             description: "本课程详细讲解SQL注入攻击的原理、分类和防御技术。通过实际案例讲解如何发现和利用SQL注入漏洞，以及如何通过参数化查询、输入验证和最小权限原则等方法防止SQL注入攻击，保障Web应用的数据安全。",
             difficulty: 3,
-            imageUrl: "a9fe8e50-ba21-45ef-abd5-50b717857502-1.SQL注入攻防实战.png",
+            imageUrl: "1.png",
             instructor: "张教授",
             costTime: 8,
             schedule: "每周一",
@@ -1854,7 +1860,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "XSS与CSRF攻击",
             description: "本课程深入剖析跨站脚本(XSS)和跨站请求伪造(CSRF)攻击的原理和防御方法。通过实例讲解反射型XSS、存储型XSS和DOM型XSS攻击，以及CSRF攻击的实施过程，帮助学习者掌握Web前端安全防护的关键技术。",
             difficulty: 2,
-            imageUrl: "eb678908-4878-4303-94ae-b3434d52612a-2.XSS漏洞深度解析.png",
+            imageUrl: "2.png",
             instructor: "李教授",
             costTime: 6,
             schedule: "每周二",
@@ -1868,7 +1874,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "IDS和IPS系统",
             description: "本课程介绍入侵检测系统(IDS)和入侵防御系统(IPS)的工作原理和部署策略。通过分析网络流量和系统行为，识别和防御各类网络攻击，包括异常检测、特征匹配和行为分析等技术，帮助学习者构建有效的网络安全防护体系。",
             difficulty: 3,
-            imageUrl: "5780e906-42a1-4a88-ad06-d054bbf92735-3.文件上传漏洞突破.png",
+            imageUrl: "3.png",
             instructor: "王教授",
             costTime: 7,
             schedule: "每周三",
@@ -1896,7 +1902,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "防火墙技术",
             description: "本课程详细讲解网络防火墙的原理、类型和配置方法。包括包过滤防火墙、状态检测防火墙、应用层防火墙和下一代防火墙的特点与部署策略，以及访问控制列表(ACL)、NAT配置、VPN集成等实用技术，帮助学习者掌握网络边界防护的核心技能。",
             difficulty: 3,
-            imageUrl: "5.组件漏洞挖掘.png",
+            imageUrl: "5.png",
             instructor: "钱教授",
             costTime: 8,
             schedule: "每周五",
@@ -1924,7 +1930,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "公钥密码简介",
             description: "本课程详细讲解公钥密码体系的基本原理和应用场景。介绍非对称加密的数学基础、密钥管理、数字证书和PKI体系，以及RSA、ECC等常用公钥算法的工作机制，帮助学习者理解现代密码学中最重要的概念和技术。",
             difficulty: 3,
-            imageUrl: "7.业务逻辑漏洞实战.png",
+            imageUrl: "7.png",
             instructor: "周教授",
             costTime: 8,
             schedule: "每周二",
@@ -1938,7 +1944,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "RSA公钥加密方案",
             description: "本课程深入剖析RSA公钥加密算法的数学原理、实现细节和安全性分析。包括素数生成、密钥生成、加密解密过程、数字签名应用，以及常见攻击方法和防御措施，帮助学习者全面掌握这一最广泛使用的公钥密码系统。",
             difficulty: 4,
-            imageUrl: "8.内网渗透技术.png",
+            imageUrl: "8.png",
             instructor: "吴教授",
             costTime: 9,
             schedule: "每周三",
@@ -1952,7 +1958,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "数字签名技术",
             description: "本课程详细介绍数字签名的原理、算法和应用。包括RSA签名、DSA、ECDSA等签名算法的工作机制，数字证书与PKI体系，以及时间戳、盲签名等高级签名技术，帮助学习者理解数字签名在信息安全中的重要作用和实现方法。",
             difficulty: 4,
-            imageUrl: "9.代码审计进阶.png",
+            imageUrl: "9.png",
             instructor: "郑教授",
             costTime: 8,
             schedule: "每周四",
@@ -1966,7 +1972,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "操作系统安全概述",
             description: "本课程全面介绍操作系统安全的核心概念和防护技术。包括访问控制、权限管理、认证机制、内核安全、内存保护等基础安全机制，以及常见操作系统的安全配置和加固方法，帮助学习者建立系统安全的整体认识。",
             difficulty: 3,
-            imageUrl: "10.CTF攻防实战.png",
+            imageUrl: "10.png",
             instructor: "王教授",
             costTime: 7,
             schedule: "每周五",
@@ -1994,7 +2000,7 @@ function getFallbackCourseDetail(id: number): Result<Course> {
             name: "网络安全概述",
             description: "本课程全面介绍网络安全的基本概念、威胁类型和防护策略。包括网络攻击分类、网络协议安全、边界防护、入侵检测与防御、安全运维等核心内容，帮助学习者建立网络安全的整体认识和防护思路。",
             difficulty: 3,
-            imageUrl: "12.漏洞挖掘方法论.png",
+            imageUrl: "12.png",
             instructor: "张教授",
             costTime: 8,
             schedule: "每周二",
@@ -2017,18 +2023,9 @@ function getFallbackCourseDetail(id: number): Result<Course> {
 }
 
 export async function getModuleDetail(id:number): Promise<Result<Module>> {
-    try {
-        const response = await axios.get(`${BASE_URL}/course/module/detail?id=${id}`);
-        if (response.status === 200) {
-            return response.data;
-        } else {
-            console.error(`Unexpected response status: ${response.status}`);
-            return getFallbackModuleDetail(id);
-        }
-    } catch (error) {
-        console.error('Error fetching module detail:', error);
-        return getFallbackModuleDetail(id);
-    }
+    // 后端目前没有单模块详情接口（含 taskPoints/questions），
+    // 直接使用前端 fallback 数据，避免无意义的 500 错误。
+    return getFallbackModuleDetail(id);
 }   
 
 // 提供硬编码的备用模块数据
@@ -2078,4 +2075,129 @@ function getFallbackModuleDetail(id: number): Result<Module> {
             data: moduleData as any
         };
     }
+}
+
+// ─────────────────────────────────────────
+//  Phase 3: Proactive Guidance SSE 订阅
+//  对接后端 GET /api/guidance/stream/{lab_session_id}
+// ─────────────────────────────────────────
+
+/**
+ * Proactive guidance SSE 事件类型（与 ai-agent-service main.py 对齐）。
+ *
+ * - ready          : 订阅成功（前端确认连接已建立）
+ * - guidance_start : docker-service 触发信号，开始生成诊断
+ * - chunk          : Dify 流式回答的增量文本
+ * - error          : 内部错误或 Dify 调用失败
+ * - guidance_end   : 本次诊断结束（含 message_id / conversation_id）
+ */
+export type GuidanceStreamEvent =
+    | { type: 'ready'; lab_session_id: string; ts: string }
+    | { type: 'guidance_start'; signal_id: string; trigger_reason: string; conversation_id?: string; error_context?: { error_signature?: string; error_category?: string; severity?: string } | null; ts: string }
+    | { type: 'chunk'; signal_id: string; content: string; ts: string }
+    | { type: 'error'; signal_id: string; message: string; ts: string }
+    | { type: 'guidance_end'; signal_id: string; message_id: string; conversation_id: string; dify_conversation_id?: string; ts: string };
+
+/** SSE 订阅回调集合 */
+export interface GuidanceStreamCallbacks {
+    onReady?: (event: Extract<GuidanceStreamEvent, { type: 'ready' }>) => void;
+    onGuidanceStart?: (event: Extract<GuidanceStreamEvent, { type: 'guidance_start' }>) => void;
+    onChunk?: (event: Extract<GuidanceStreamEvent, { type: 'chunk' }>) => void;
+    onError?: (event: Extract<GuidanceStreamEvent, { type: 'error' }>) => void;
+    onGuidanceEnd?: (event: Extract<GuidanceStreamEvent, { type: 'guidance_end' }>) => void;
+    /** 解析失败时调用（不影响后续事件） */
+    onParseError?: (raw: string, err: unknown) => void;
+}
+
+/**
+ * 订阅指定 lab_session_id 的 proactive guidance SSE 事件流。
+ *
+ * 使用 fetch + ReadableStream 而非 EventSource，原因：
+ * 1. 与 FloatingChat.vue 的 /api/chat SSE 解析风格一致，便于维护
+ * 2. 不自动重连（避免服务端已发 guidance_end 后又重连产生重复订阅）
+ * 3. 可通过 AbortController 干净地断开
+ *
+ * @returns unsubscribe 函数，调用后立即断开 SSE 连接
+ */
+export function subscribeGuidanceStream(
+    labSessionId: string,
+    callbacks: GuidanceStreamCallbacks
+): () => void {
+    const controller = new AbortController();
+    const url = `${AGENT_BASE_URL}/api/guidance/stream/${encodeURIComponent(labSessionId)}`;
+
+    // 异步启动 fetch；不 await，调用方通过返回的函数断开
+    (async () => {
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                signal: controller.signal,
+                headers: {
+                    'Accept': 'text/event-stream',
+                    'Cache-Control': 'no-cache',
+                },
+            });
+            if (!response.ok || !response.body) {
+                callbacks.onParseError?.(
+                    `HTTP ${response.status}`,
+                    new Error(`SSE connection failed: ${response.status}`)
+                );
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? ''; // 保留不完整行
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith('data:')) continue;
+                    const raw = trimmed.slice(5).trim();
+                    if (!raw || raw === '[DONE]') continue;
+
+                    try {
+                        const event = JSON.parse(raw) as GuidanceStreamEvent;
+                        switch (event.type) {
+                            case 'ready':
+                                callbacks.onReady?.(event);
+                                break;
+                            case 'guidance_start':
+                                callbacks.onGuidanceStart?.(event);
+                                break;
+                            case 'chunk':
+                                callbacks.onChunk?.(event);
+                                break;
+                            case 'error':
+                                callbacks.onError?.(event);
+                                break;
+                            case 'guidance_end':
+                                callbacks.onGuidanceEnd?.(event);
+                                break;
+                            default:
+                                // 未知事件类型：交给 onParseError，但不中断流
+                                callbacks.onParseError?.(raw, new Error(`unknown event type: ${(event as any).type}`));
+                        }
+                    } catch (err) {
+                        callbacks.onParseError?.(raw, err);
+                    }
+                }
+            }
+        } catch (err: unknown) {
+            // AbortError 是正常的断开，不视为错误
+            if (err instanceof DOMException && err.name === 'AbortError') return;
+            callbacks.onParseError?.('', err);
+        }
+    })();
+
+    return () => {
+        controller.abort();
+    };
 }

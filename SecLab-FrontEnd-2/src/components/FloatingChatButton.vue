@@ -13,6 +13,13 @@
         v-if="currentLabContainer"
         class="absolute top-0 right-0 w-3 h-3 bg-green-400 rounded-full border-2 border-white animate-pulse"
       ></span>
+      <!-- Phase 3: 未读主动提示徽标 -->
+      <span
+        v-if="guidanceUnreadCount > 0"
+        class="absolute -top-1 -left-1 min-w-[20px] h-[20px] px-1 bg-error text-error-content text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-base-100 z-10 shadow-md"
+      >
+        {{ guidanceUnreadCount > 9 ? '9+' : guidanceUnreadCount }}
+      </span>
     </button>
 
     <!-- ② 聊天窗口 -->
@@ -61,7 +68,17 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import FloatingChat from './FloatingChat.vue'
-import { currentLabContainer, labStartTime, setLabRunning } from '../composables/useLabState'
+import {
+  currentLabContainer,
+  labStartTime,
+  setLabRunning,
+  currentLabContext,
+  guidanceUnreadCount,
+  addGuidanceAlert,
+  updateGuidanceAlert,
+  appendGuidanceChunk,
+} from '../composables/useLabState'
+import { subscribeGuidanceStream } from '../api'
 
 const props = defineProps({
   compact: { type: Boolean, default: true },
@@ -142,5 +159,81 @@ onMounted(() => window.addEventListener('message', handleLabMessage))
 onUnmounted(() => {
   if (hintTimer) clearTimeout(hintTimer)
   window.removeEventListener('message', handleLabMessage)
+  // Phase 3: 断开 guidance SSE 订阅
+  if (unsubscribeGuidance) {
+    unsubscribeGuidance()
+    unsubscribeGuidance = null
+  }
 })
+
+// ── Phase 3: Proactive Guidance SSE 订阅 ────────────────────
+// 架构决策：SSE 订阅放 FloatingChatButton（始终挂载），不放 FloatingChat（v-if 挂载）。
+// 这样聊天关闭时仍能接收 guidance 信号，打开后通过 guidanceAlerts 同步显示。
+let unsubscribeGuidance: (() => void) | null = null
+
+/** 根据 labSessionId 订阅 guidance SSE 事件流 */
+function setupGuidanceSubscription(labSessionId: string) {
+  // 先取消旧订阅（labSessionId 可能从临时 ID 切换到真实后端 ID）
+  if (unsubscribeGuidance) {
+    unsubscribeGuidance()
+    unsubscribeGuidance = null
+  }
+  if (!labSessionId) return
+
+  console.log('[guidance] SSE subscribing:', labSessionId)
+  unsubscribeGuidance = subscribeGuidanceStream(labSessionId, {
+    onReady: (evt) => {
+      console.log('[guidance] SSE ready:', evt.lab_session_id)
+    },
+    onGuidanceStart: (evt) => {
+      // 新信号到达 → 创建一条 streaming alert
+      addGuidanceAlert({
+        signal_id: evt.signal_id,
+        trigger_reason: evt.trigger_reason,
+        conversation_id: evt.conversation_id,
+        error_context: evt.error_context,
+        content: '',
+        status: 'streaming',
+        started_at: evt.ts,
+      })
+    },
+    onChunk: (evt) => {
+      // 流式增量 → 追加到对应 alert 的 content
+      appendGuidanceChunk(evt.signal_id, evt.content)
+    },
+    onError: (evt) => {
+      // 内部错误 → 标记 alert 为 error 状态
+      updateGuidanceAlert(evt.signal_id, {
+        status: 'error',
+        error_message: evt.message,
+        ended_at: evt.ts,
+      })
+    },
+    onGuidanceEnd: (evt) => {
+      // 诊断完成 → 标记 alert 为 done，回填 message_id
+      updateGuidanceAlert(evt.signal_id, {
+        status: 'done',
+        message_id: evt.message_id,
+        conversation_id: evt.conversation_id,
+        ended_at: evt.ts,
+      })
+    },
+    onParseError: (raw, err) => {
+      console.warn('[guidance] SSE parse error:', raw, err)
+    },
+  })
+}
+
+// 监听 labSessionId 变化 → (re)subscribe
+// 注意：Module 页面先 setLabRunning 设置临时 ID，再 startLabSession 后用真实 ID 覆盖，
+// 这里会触发两次订阅，第二次会取消并替换第一次（临时 ID 订阅收不到事件，无副作用）。
+watch(
+  () => currentLabContext.value.labSessionId,
+  (newId, oldId) => {
+    if (newId && newId !== oldId) {
+      setupGuidanceSubscription(newId)
+    }
+  },
+  { immediate: true }
+)
 </script>
