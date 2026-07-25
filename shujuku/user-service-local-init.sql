@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS `user` (
   `user_id` BIGINT NOT NULL AUTO_INCREMENT,
   `create_time` DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6),
   `is_admin` BIT(1) DEFAULT b'0',
+  `user_role` VARCHAR(16) NOT NULL DEFAULT 'STUDENT',
   `is_deleted` INT DEFAULT 0,
   `user_academy` VARCHAR(255) DEFAULT NULL,
   `user_email` VARCHAR(255) DEFAULT NULL,
@@ -55,6 +56,7 @@ INSERT INTO `user` (
   `user_image`,
   `class_id_class_id`,
   `is_admin`,
+  `user_role`,
   `is_deleted`
 )
 SELECT
@@ -68,6 +70,7 @@ SELECT
   NULL,
   (SELECT `class_id` FROM `class` WHERE `class_name` = '网络安全232班' ORDER BY `class_id` LIMIT 1),
   b'1',
+  'TEACHER',
   0
 WHERE NOT EXISTS (
   SELECT 1 FROM `user` WHERE `user_student_number` = 'admin'

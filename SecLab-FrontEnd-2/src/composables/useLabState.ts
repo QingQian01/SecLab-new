@@ -23,6 +23,7 @@ export const CONTAINER_NAMES: Record<number, string> = {
   5: 'file-upload-lab-web-1',
   6: 'directory-traversal-lab-web-1',
   15: 'stack-overflow-lab-web-1',
+  16: 'protocol-analysis-lab-web-1',
 }
 
 /** 当前靶机容器名，空字符串表示未启动 */

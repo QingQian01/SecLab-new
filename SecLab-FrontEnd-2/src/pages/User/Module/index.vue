@@ -452,6 +452,8 @@ const getDockerLabKey = (baseId: number): string => {
       return 'upload';
     case 6:
       return 'dir';
+    case 16:
+      return 'protocol';
     default:
       return 'sqli';
   }
@@ -530,6 +532,8 @@ const getDefaultTargetUrl = (baseId: number): string => {
       return 'http://localhost:8094/index.php';
     case 6:
       return 'http://localhost:8095/index.php';
+    case 16:
+      return 'http://localhost:8896/index.php';
     default:
       return 'http://localhost:8091/index.php';
   }

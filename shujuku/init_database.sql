@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS `user` (
     user_gender INT DEFAULT 2,
     class_id_class_id BIGINT NOT NULL,
     is_admin BOOLEAN DEFAULT FALSE,
+    user_role VARCHAR(16) NOT NULL DEFAULT 'STUDENT',
     is_deleted INT DEFAULT 0,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_user_student_number (user_student_number),
@@ -39,8 +40,8 @@ INSERT IGNORE INTO `class` (class_name, class_detail) VALUES
 ('网络安全231班', '网络安全231班'),
 ('网络安全233班', '网络安全233班');
 
-INSERT IGNORE INTO `user` (user_student_number, user_password, user_name, user_gender, class_id_class_id, is_admin) VALUES
-('admin', 'e10adc3949ba59abbe56e057f20f883e', 'Administrator', 1, 1, true); -- password: 123456 (legacy MD5)
+INSERT IGNORE INTO `user` (user_student_number, user_password, user_name, user_gender, class_id_class_id, is_admin, user_role) VALUES
+('admin', 'e10adc3949ba59abbe56e057f20f883e', 'Administrator', 1, 1, true, 'TEACHER'); -- password: 123456 (legacy MD5)
 
 -- Create experimentmoduleservice database
 CREATE DATABASE IF NOT EXISTS experimentmoduleservice DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
