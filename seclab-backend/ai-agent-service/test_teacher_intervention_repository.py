@@ -1,11 +1,33 @@
 import unittest
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import teacher_intervention_repository as interventions
 
 
 class TeacherInterventionHelpersTest(unittest.TestCase):
+    def test_legacy_course_column_migration_uses_information_schema_not_unsupported_if_not_exists(self):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = {"column_exists": 1}
+
+        interventions._ensure_course_id_column(cursor)
+
+        statements = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertTrue(any("information_schema.columns" in sql for sql in statements))
+        self.assertFalse(any("ADD COLUMN IF NOT EXISTS" in sql for sql in statements))
+        self.assertFalse(any("ALTER TABLE teacher_intervention" in sql for sql in statements))
+
+    def test_legacy_course_column_is_added_only_when_missing(self):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = {"column_exists": 0}
+
+        interventions._ensure_course_id_column(cursor)
+
+        statements = [call.args[0] for call in cursor.execute.call_args_list]
+        migration = next(sql for sql in statements if "ALTER TABLE teacher_intervention" in sql)
+        self.assertIn("ADD COLUMN course_id", migration)
+        self.assertNotIn("IF NOT EXISTS", migration)
+
     def test_student_assignment_summary_exposes_experiment_questions_deadline_and_result(self):
         row = {
             "assignment_status": "COMPLETED",

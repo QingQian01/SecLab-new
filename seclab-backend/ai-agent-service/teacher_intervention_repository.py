@@ -93,7 +93,6 @@ SCHEMA_STATEMENTS = (
       KEY idx_intervention_teacher_time (teacher_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
-    "ALTER TABLE teacher_intervention ADD COLUMN IF NOT EXISTS course_id INT NULL AFTER teaching_class_id",
     """
     CREATE TABLE IF NOT EXISTS teacher_intervention_student (
       intervention_id BIGINT NOT NULL,
@@ -254,11 +253,30 @@ def compare_metric_snapshots(
     }
 
 
+def _ensure_course_id_column(cursor) -> None:
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS column_exists
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'teacher_intervention'
+          AND column_name = 'course_id'
+        """
+    )
+    row = cursor.fetchone() or {}
+    if int(row.get("column_exists") or 0) == 0:
+        cursor.execute(
+            "ALTER TABLE teacher_intervention "
+            "ADD COLUMN course_id INT NULL AFTER teaching_class_id"
+        )
+
+
 def ensure_intervention_schema() -> None:
     with get_connection() as conn:
         with conn.cursor() as cursor:
             for statement in SCHEMA_STATEMENTS:
                 cursor.execute(statement)
+            _ensure_course_id_column(cursor)
         conn.commit()
 
 
