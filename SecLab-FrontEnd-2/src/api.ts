@@ -990,6 +990,86 @@ export interface LearningReplayResponseDto {
     items: CapabilityEvidenceItemDto[];
 }
 
+export type CapabilityGrowthDimensionKey =
+    | "knowledge_mastery"
+    | "troubleshooting"
+    | "autonomy"
+    | "ai_collaboration"
+    | "engagement";
+
+export interface CapabilityGrowthMetricDto {
+    key: string;
+    label: string;
+    baselineValue?: number | null;
+    currentValue?: number | null;
+    unit: "percent" | "seconds" | "score" | string;
+    changeRate?: number | null;
+    direction: "improved" | "stable" | "declined" | "insufficient" | string;
+    baselineSampleCount: number;
+    currentSampleCount: number;
+    confidence: "high" | "moderate" | "emerging" | "insufficient" | string;
+    explanation: string;
+    sourceTypes: string[];
+    sourceRecordIds: string[];
+}
+
+export interface CapabilityGrowthEvidenceDto {
+    kind: string;
+    title: string;
+    detail?: string;
+    occurredAt?: string | null;
+    sourceId: string;
+    sourceType: string;
+}
+
+export interface CapabilityGrowthDimensionDto {
+    key: CapabilityGrowthDimensionKey;
+    label: string;
+    baselineScore?: number | null;
+    currentScore?: number | null;
+    delta?: number | null;
+    confidence: string;
+    summary: string;
+    metrics: CapabilityGrowthMetricDto[];
+    evidence: CapabilityGrowthEvidenceDto[];
+}
+
+export interface CapabilityGrowthHistoryDto {
+    snapshotId: string;
+    computedAt?: string | null;
+    overallScore?: number | null;
+    knowledge_masteryScore?: number | null;
+    troubleshootingScore?: number | null;
+    autonomyScore?: number | null;
+    ai_collaborationScore?: number | null;
+    engagementScore?: number | null;
+}
+
+export interface CapabilityGrowthResponseDto {
+    studentId: number;
+    teachingClassId?: number | null;
+    baselineComputedAt?: string | null;
+    currentComputedAt?: string | null;
+    calculationVersion: string;
+    dataProvenance: {
+        mode: string;
+        calculationVersion?: string;
+        eligibleRecordCount?: number;
+        excludedRecordCount?: number;
+        unverifiableRecordCount?: number;
+        sourceTypes?: string[];
+        snapshotIds?: string[];
+    };
+    overall: {
+        baselineScore?: number | null;
+        currentScore?: number | null;
+        delta?: number | null;
+    };
+    dimensions: CapabilityGrowthDimensionDto[];
+    history: CapabilityGrowthHistoryDto[];
+    message?: string | null;
+}
+
 export interface KnowledgeRiskItemDto {
     courseId?: number | null;
     courseName: string;
@@ -2545,6 +2625,17 @@ export async function getTeachingClassStudentCapabilityEvidence(
     return response.data;
 }
 
+export async function getTeachingClassStudentCapabilityGrowth(
+    teachingClassId: number,
+    studentId: number,
+): Promise<CapabilityGrowthResponseDto> {
+    const response = await axios.get<CapabilityGrowthResponseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}/capability-growth`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
 export async function getTeachingClassStudentLearningReplay(
     teachingClassId: number,
     studentId: number,
@@ -2719,6 +2810,20 @@ export async function getStudentTeacherAssignments(
     const response = await axios.get(
         `${AGENT_BASE_URL}/api/students/${studentId}/teacher-assignments`,
         getBearerAuthConfig("当前没有登录态 token，无法读取教师布置任务。"),
+    );
+    return response.data;
+}
+
+export async function getStudentCapabilityGrowth(
+    studentId: number,
+    teachingClassId?: number,
+): Promise<CapabilityGrowthResponseDto> {
+    const response = await axios.get<CapabilityGrowthResponseDto>(
+        `${AGENT_BASE_URL}/api/students/${studentId}/capability-growth`,
+        {
+            params: teachingClassId == null ? undefined : { teachingClassId },
+            ...getBearerAuthConfig("当前没有登录态 token，无法读取能力成长数据。"),
+        },
     );
     return response.data;
 }
