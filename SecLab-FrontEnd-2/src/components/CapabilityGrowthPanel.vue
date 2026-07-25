@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Chart from 'chart.js/auto'
 
 import type {
+  CapabilityGrowthEvidenceDto,
   CapabilityGrowthDimensionDto,
   CapabilityGrowthHistoryDto,
   CapabilityGrowthResponseDto,
@@ -74,6 +75,63 @@ function formatDate(value: string | null | undefined): string {
     month: 'short',
     day: 'numeric',
   }).format(date)
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '未记录'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+function formatDuration(value: number | null | undefined): string {
+  if (value == null || value < 0) return '未记录'
+  const totalSeconds = Math.round(value)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours) return `${hours}小时${minutes}分${seconds}秒`
+  if (minutes) return `${minutes}分${seconds}秒`
+  return `${seconds}秒`
+}
+
+function evidenceStatusLabel(status: string | null | undefined): string {
+  const normalized = String(status || '').toLowerCase()
+  if (['completed', 'success'].includes(normalized)) return '已完成'
+  if (['stopped', 'ended'].includes(normalized)) return '已结束'
+  if (['running', 'active'].includes(normalized)) return '进行中'
+  if (['failed', 'error'].includes(normalized)) return '未完成'
+  return status || '状态未记录'
+}
+
+function evidenceEventLabel(eventType: string): string {
+  return {
+    LAB_START: '进入实验',
+    LAB_STOP: '退出实验',
+    COMMAND_EXEC: '执行命令',
+    AI_INTERACTION: 'AI 交互',
+    ERROR_OCCURRED: '发生错误',
+    FLAG_SUBMIT: '提交 Flag',
+  }[eventType] || eventType
+}
+
+function hasLabTrace(item: CapabilityGrowthEvidenceDto): boolean {
+  return Boolean(
+    item.labSessionId
+    || item.targetUrl
+    || item.containerName
+    || item.startedAt
+    || item.endedAt
+    || item.eventTypes?.length,
+  )
 }
 
 function historyValue(row: CapabilityGrowthHistoryDto): number | null | undefined {
@@ -277,18 +335,91 @@ onBeforeUnmount(() => chart?.destroy())
 
         <div v-if="selectedDimension.evidence.length" class="evidence-list">
           <h4>最近证据</h4>
-          <div
+          <details
             v-for="item in selectedDimension.evidence"
             :key="`${item.sourceType}-${item.sourceId}`"
             class="evidence-row"
           >
-            <span class="evidence-mark" aria-hidden="true"></span>
-            <div>
-              <strong>{{ item.title }}</strong>
-              <p>{{ item.detail || '已记录真实学习行为' }}</p>
+            <summary>
+              <span class="evidence-mark" aria-hidden="true"></span>
+              <div class="evidence-summary-main">
+                <div class="evidence-title">
+                  <strong>{{ item.title }}</strong>
+                  <span v-if="item.status" class="evidence-status">{{ evidenceStatusLabel(item.status) }}</span>
+                </div>
+                <p>{{ item.detail || '该历史记录未保存内容摘要' }}</p>
+                <div v-if="item.durationSeconds != null || item.eventCount != null" class="evidence-facts">
+                  <span v-if="item.durationSeconds != null">持续 {{ formatDuration(item.durationSeconds) }}</span>
+                  <span v-if="item.eventCount != null">记录 {{ item.eventCount }} 条事件</span>
+                </div>
+              </div>
+              <time>{{ formatDate(item.occurredAt) }}</time>
+              <span class="evidence-toggle" aria-hidden="true">展开详情</span>
+            </summary>
+
+            <div class="evidence-detail">
+              <dl>
+                <template v-if="item.moduleName || item.moduleId != null">
+                  <dt>实验模块</dt>
+                  <dd>{{ item.moduleName || `模块 ${item.moduleId}` }}</dd>
+                </template>
+                <template v-if="item.courseId != null">
+                  <dt>课程 ID</dt>
+                  <dd>{{ item.courseId }}</dd>
+                </template>
+                <template v-if="item.taskId != null">
+                  <dt>任务 ID</dt>
+                  <dd>{{ item.taskId }}</dd>
+                </template>
+                <template v-if="item.targetUrl">
+                  <dt>访问目标</dt>
+                  <dd class="trace-value">{{ item.targetUrl }}</dd>
+                </template>
+                <template v-if="item.containerName">
+                  <dt>实验容器</dt>
+                  <dd class="trace-value">{{ item.containerName }}</dd>
+                </template>
+                <template v-if="item.startedAt">
+                  <dt>开始时间</dt>
+                  <dd>{{ formatDateTime(item.startedAt) }}</dd>
+                </template>
+                <template v-if="item.endedAt">
+                  <dt>结束时间</dt>
+                  <dd>{{ formatDateTime(item.endedAt) }}</dd>
+                </template>
+                <template v-if="item.durationSeconds != null">
+                  <dt>实际时长</dt>
+                  <dd>{{ formatDuration(item.durationSeconds) }}</dd>
+                </template>
+                <template v-if="item.messageContent">
+                  <dt>实际提问</dt>
+                  <dd class="message-content">{{ item.messageContent }}</dd>
+                </template>
+                <template v-if="item.eventTypes?.length">
+                  <dt>记录事件</dt>
+                  <dd class="event-types">
+                    <span v-for="eventType in item.eventTypes" :key="eventType">
+                      {{ eventType }}（{{ evidenceEventLabel(eventType) }}）
+                    </span>
+                  </dd>
+                </template>
+                <template v-if="item.labSessionId">
+                  <dt>会话 ID</dt>
+                  <dd class="trace-value">{{ item.labSessionId }}</dd>
+                </template>
+                <template v-if="item.conversationId">
+                  <dt>对话 ID</dt>
+                  <dd class="trace-value">{{ item.conversationId }}</dd>
+                </template>
+                <template v-if="!hasLabTrace(item) && !item.messageContent">
+                  <dt>原始记录</dt>
+                  <dd>该历史记录没有保存更多业务明细</dd>
+                </template>
+                <dt>来源记录</dt>
+                <dd class="trace-value">{{ item.sourceType }} / {{ item.sourceId }}</dd>
+              </dl>
             </div>
-            <time>{{ formatDate(item.occurredAt) }}</time>
-          </div>
+          </details>
         </div>
       </article>
 
@@ -603,19 +734,115 @@ onBeforeUnmount(() => chart?.destroy())
 }
 
 .evidence-row {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 12px;
-  padding: 14px 0;
   border-bottom: 1px solid #f1f5f9;
 }
 
+.evidence-row summary {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: 12px;
+  padding: 16px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.evidence-row summary::-webkit-details-marker { display: none; }
 .evidence-row strong { font-size: 14px; }
 .evidence-row p { margin-top: 2px; }
 .evidence-row time {
   color: #94a3b8;
   font-size: 12px;
+}
+
+.evidence-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.evidence-status {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.evidence-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 7px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.evidence-toggle {
+  min-width: 56px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.evidence-row[open] .evidence-toggle {
+  font-size: 0;
+}
+
+.evidence-row[open] .evidence-toggle::after {
+  content: '收起详情';
+  font-size: 12px;
+}
+
+.evidence-detail {
+  margin: 0 0 16px 22px;
+  padding: 16px 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.evidence-detail dl {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.evidence-detail dt {
+  color: #64748b;
+}
+
+.evidence-detail dd {
+  margin: 0;
+  color: #1e293b;
+}
+
+.trace-value {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.message-content {
+  white-space: pre-wrap;
+}
+
+.event-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-types span {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #e0edff;
+  color: #1d4ed8;
+  font-size: 11px;
 }
 
 .evidence-mark {
@@ -721,8 +948,26 @@ onBeforeUnmount(() => chart?.destroy())
 
   .metric-row { grid-template-columns: 1fr; }
   .metric-explanation { grid-column: auto; }
-  .evidence-row { grid-template-columns: 10px 1fr; }
-  .evidence-row time { grid-column: 2; }
+  .evidence-row summary {
+    grid-template-columns: 10px 1fr auto;
+  }
+  .evidence-row time {
+    grid-column: 2;
+  }
+  .evidence-toggle {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .evidence-detail {
+    margin-left: 0;
+  }
+  .evidence-detail dl {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .evidence-detail dd {
+    margin-bottom: 8px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

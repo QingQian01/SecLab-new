@@ -140,4 +140,48 @@ describe('CapabilityGrowthPanel', () => {
     expect(html).toContain('完成真实实验和练习后，这里会形成可追溯的成长证据')
     expect(html).not.toContain('0.0')
   })
+
+  it('shows exactly which real experiment was accessed and exposes trace details', async () => {
+    const engagement = realGrowth.dimensions.find((item) => item.key === 'engagement')!
+    const html = await renderToString(createSSRApp(CapabilityGrowthPanel, {
+      data: {
+        ...realGrowth,
+        dimensions: [{
+          ...engagement,
+          evidence: [{
+            kind: 'LAB',
+            title: 'SQL注入基础实验',
+            detail: '访问 http://localhost:8091/index.php',
+            occurredAt: '2026-07-25T00:48:42',
+            sourceId: 'lab-real-1',
+            sourceType: 'lab_session',
+            labSessionId: 'lab-real-1',
+            courseId: 1,
+            moduleId: 1,
+            taskId: null,
+            moduleName: 'SQL注入基础实验',
+            status: 'stopped',
+            startedAt: '2026-07-25T00:48:42',
+            endedAt: '2026-07-25T00:50:52',
+            durationSeconds: 130,
+            targetUrl: 'http://localhost:8091/index.php',
+            containerName: 'sqli-lab-web-1',
+            eventCount: 8,
+            eventTypes: ['COMMAND_EXEC', 'LAB_START', 'LAB_STOP'],
+          }],
+        }],
+      },
+    }))
+
+    expect(html).toContain('<details')
+    expect(html).toContain('SQL注入基础实验')
+    expect(html).toContain('访问 http://localhost:8091/index.php')
+    expect(html).toContain('已结束')
+    expect(html).toContain('2分10秒')
+    expect(html).toContain('8 条事件')
+    expect(html).toContain('sqli-lab-web-1')
+    expect(html).toContain('lab-real-1')
+    expect(html).toContain('COMMAND_EXEC')
+    expect(html).not.toContain('已记录真实学习行为')
+  })
 })

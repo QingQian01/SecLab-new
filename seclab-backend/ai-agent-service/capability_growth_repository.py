@@ -316,6 +316,89 @@ def _build_rate_dimension(
     return metrics, evidence
 
 
+def _event_type_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [
+        item.strip()
+        for item in str(value or "").split(",")
+        if item.strip()
+    ]
+
+
+def build_lab_evidence(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(
+        rows,
+        key=lambda row: _as_datetime(row.get("occurredAt")),
+        reverse=True,
+    )
+    evidence: list[dict[str, Any]] = []
+    for row in ordered[:5]:
+        source_id = str(row.get("sourceId") or "")
+        module_id = row.get("moduleId")
+        module_name = str(row.get("moduleName") or "").strip()
+        target_url = str(row.get("targetUrl") or "").strip()
+        title = module_name or (
+            f"实验模块 {module_id}" if module_id is not None else f"实验会话 {source_id}"
+        )
+        evidence.append(
+            {
+                "kind": "LAB",
+                "title": title,
+                "detail": f"访问 {target_url}" if target_url else "未记录访问地址",
+                "occurredAt": _iso(row.get("occurredAt")),
+                "sourceId": source_id,
+                "sourceType": str(row.get("sourceType") or ""),
+                "labSessionId": source_id,
+                "courseId": row.get("courseId"),
+                "moduleId": module_id,
+                "taskId": row.get("taskId"),
+                "moduleName": module_name or None,
+                "status": row.get("status"),
+                "startedAt": _iso(row.get("startedAt")),
+                "endedAt": _iso(row.get("endedAt")),
+                "durationSeconds": row.get("durationSeconds"),
+                "targetUrl": target_url or None,
+                "containerName": row.get("containerName"),
+                "eventCount": int(row.get("eventCount") or 0),
+                "eventTypes": _event_type_list(row.get("eventTypes")),
+            }
+        )
+    return evidence
+
+
+def build_ai_evidence(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(
+        rows,
+        key=lambda row: _as_datetime(row.get("occurredAt")),
+        reverse=True,
+    )
+    evidence: list[dict[str, Any]] = []
+    for row in ordered[:5]:
+        content = str(row.get("messageContent") or "").strip()
+        module_name = str(row.get("moduleName") or "").strip()
+        evidence.append(
+            {
+                "kind": "AI",
+                "title": f"提问：{content}" if content else "AI 提问内容未记录",
+                "detail": (
+                    f"{module_name} · {'包含实验上下文' if row.get('isContextRich') else '未包含实验上下文'}"
+                    if module_name
+                    else ("包含实验上下文" if row.get("isContextRich") else "未包含实验上下文")
+                ),
+                "occurredAt": _iso(row.get("occurredAt")),
+                "sourceId": str(row.get("sourceId") or ""),
+                "sourceType": str(row.get("sourceType") or ""),
+                "conversationId": row.get("conversationId"),
+                "moduleId": row.get("moduleId"),
+                "taskId": row.get("taskId"),
+                "moduleName": module_name or None,
+                "messageContent": content or None,
+            }
+        )
+    return evidence
+
+
 def _fetch_rows(cursor, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     cursor.execute(sql, params)
     return list(cursor.fetchall() or [])
@@ -459,13 +542,18 @@ def _load_growth_rows(
                     'ai_message' AS sourceType,
                     m.message_id AS sourceId,
                     c.source AS originSource,
-                    COALESCE(c.module_id, 0) AS moduleId,
-                    COALESCE(c.task_id, 0) AS taskId,
+                    c.conversation_id AS conversationId,
+                    c.module_id AS moduleId,
+                    c.task_id AS taskId,
+                    module_catalog.module_name AS moduleName,
+                    m.content AS messageContent,
                     (m.contains_context = 1 OR m.contains_error_excerpt = 1) AS isContextRich,
                     m.created_at AS occurredAt
                 FROM ai_message m
                 INNER JOIN ai_conversation c
                   ON c.conversation_id = m.conversation_id
+                LEFT JOIN userservice.module module_catalog
+                  ON module_catalog.module_id = c.module_id
                 WHERE c.user_id = %(student_id)s
                   AND m.role = 'user'
                   AND (%(class_id)s IS NULL OR c.class_id = %(class_id)s)
@@ -491,17 +579,57 @@ def _load_growth_rows(
                             ORDER BY cmd.executed_at ASC LIMIT 1
                         )
                     ) AS originSource,
+                    ls.course_id AS courseId,
+                    ls.module_id AS moduleId,
+                    ls.task_id AS taskId,
+                    module_catalog.module_name AS moduleName,
                     COALESCE(kp.difficulty_level, 'unknown') AS difficulty,
                     ls.status = 'completed' AS isCompleted,
+                    ls.status AS status,
+                    ls.container_name AS containerName,
+                    ls.target_url AS targetUrl,
+                    ls.start_time AS startedAt,
+                    ls.end_time AS endedAt,
+                    CASE
+                        WHEN ls.end_time IS NULL THEN NULL
+                        ELSE TIMESTAMPDIFF(SECOND, ls.start_time, ls.end_time)
+                    END AS durationSeconds,
+                    (
+                        SELECT COUNT(*)
+                        FROM learning_event event_count
+                        WHERE event_count.lab_session_id = ls.session_id
+                    ) AS eventCount,
+                    (
+                        SELECT GROUP_CONCAT(
+                            DISTINCT event_type.event_type
+                            ORDER BY event_type.event_time
+                            SEPARATOR ','
+                        )
+                        FROM learning_event event_type
+                        WHERE event_type.lab_session_id = ls.session_id
+                    ) AS eventTypes,
                     ls.start_time AS occurredAt
                 FROM lab_session ls
+                LEFT JOIN userservice.module module_catalog
+                  ON module_catalog.module_id = ls.module_id
                 LEFT JOIN task_knowledge_point tkp
                   ON tkp.module_id = ls.module_id AND tkp.task_id = ls.task_id
                 LEFT JOIN knowledge_point kp
                   ON kp.knowledge_point_id = tkp.knowledge_point_id
                 WHERE ls.user_id = %(student_id)s
                   AND (%(class_id)s IS NULL OR ls.class_id = %(class_id)s)
-                GROUP BY ls.session_id, kp.difficulty_level
+                GROUP BY
+                    ls.session_id,
+                    ls.course_id,
+                    ls.module_id,
+                    ls.task_id,
+                    module_catalog.module_name,
+                    kp.difficulty_level,
+                    ls.status,
+                    ls.container_name,
+                    ls.target_url,
+                    ls.start_time,
+                    ls.end_time
                 ORDER BY ls.start_time ASC
                 """,
                 params,
@@ -556,28 +684,26 @@ def get_student_capability_growth(
             evidence_title="真实实验完成记录",
         )
     )
-    metrics_by_dimension["ai_collaboration"], evidence_by_dimension["ai_collaboration"] = (
-        _build_rate_dimension(
-            clean["aiMessageRows"],
-            bucket_fields=("moduleId", "taskId"),
-            success_field="isContextRich",
-            key="context_rich_question_rate",
-            label="包含上下文的 AI 提问比例",
-            evidence_kind="AI",
-            evidence_title="真实 AI 提问记录",
-        )
+    metrics_by_dimension["ai_collaboration"], _ = _build_rate_dimension(
+        clean["aiMessageRows"],
+        bucket_fields=("moduleId", "taskId"),
+        success_field="isContextRich",
+        key="context_rich_question_rate",
+        label="包含上下文的 AI 提问比例",
+        evidence_kind="AI",
+        evidence_title="真实 AI 提问记录",
     )
-    metrics_by_dimension["engagement"], evidence_by_dimension["engagement"] = (
-        _build_rate_dimension(
-            clean["labRows"],
-            bucket_fields=("difficulty",),
-            success_field="isCompleted",
-            key="lab_completion_rate",
-            label="同难度实验完成率",
-            evidence_kind="LAB",
-            evidence_title="真实实验会话",
-        )
+    evidence_by_dimension["ai_collaboration"] = build_ai_evidence(clean["aiMessageRows"])
+    metrics_by_dimension["engagement"], _ = _build_rate_dimension(
+        clean["labRows"],
+        bucket_fields=("difficulty",),
+        success_field="isCompleted",
+        key="lab_completion_rate",
+        label="同难度实验完成率",
+        evidence_kind="LAB",
+        evidence_title="真实实验会话",
     )
+    evidence_by_dimension["engagement"] = build_lab_evidence(clean["labRows"])
 
     provenance = _snapshot_provenance(loaded.get("snapshots") or [])
     if behavior_provenance.get("eligibleRecordCount", 0) > 0:

@@ -132,6 +132,104 @@ class CapabilityGrowthRepositoryTest(unittest.TestCase):
         self.assertIn("fail-0", recovery["sourceRecordIds"])
         self.assertTrue(evidence)
 
+    def test_lab_evidence_exposes_the_actual_accessed_experiment_and_session(self):
+        evidence = repository.build_lab_evidence(
+            [
+                {
+                    "sourceId": "lab-real-1",
+                    "sourceType": "lab_session",
+                    "originSource": "docker-runtime",
+                    "courseId": 1,
+                    "moduleId": 1,
+                    "taskId": None,
+                    "moduleName": "SQL注入基础实验",
+                    "containerName": "sqli-lab-web-1",
+                    "targetUrl": "http://localhost:8091/index.php",
+                    "status": "stopped",
+                    "startedAt": datetime(2026, 7, 25, 0, 48, 42),
+                    "endedAt": datetime(2026, 7, 25, 0, 50, 52),
+                    "durationSeconds": 130,
+                    "eventCount": 2,
+                    "eventTypes": "LAB_START,LAB_STOP",
+                    "isCompleted": False,
+                    "occurredAt": datetime(2026, 7, 25, 0, 48, 42),
+                }
+            ]
+        )
+
+        self.assertEqual(evidence[0]["title"], "SQL注入基础实验")
+        self.assertEqual(evidence[0]["detail"], "访问 http://localhost:8091/index.php")
+        self.assertEqual(evidence[0]["labSessionId"], "lab-real-1")
+        self.assertEqual(evidence[0]["containerName"], "sqli-lab-web-1")
+        self.assertEqual(evidence[0]["durationSeconds"], 130)
+        self.assertEqual(evidence[0]["eventCount"], 2)
+        self.assertEqual(evidence[0]["eventTypes"], ["LAB_START", "LAB_STOP"])
+
+    def test_ai_evidence_exposes_the_actual_student_message(self):
+        evidence = repository.build_ai_evidence(
+            [
+                {
+                    "sourceId": "message-real-1",
+                    "sourceType": "ai_message",
+                    "originSource": "frontend",
+                    "conversationId": "conversation-real-1",
+                    "moduleId": 1,
+                    "taskId": 2,
+                    "moduleName": "SQL注入基础实验",
+                    "messageContent": "为什么 UNION 查询的列数必须一致？",
+                    "isContextRich": True,
+                    "occurredAt": datetime(2026, 7, 25, 8, 49, 21),
+                }
+            ]
+        )
+
+        self.assertEqual(
+            evidence[0]["title"],
+            "提问：为什么 UNION 查询的列数必须一致？",
+        )
+        self.assertEqual(
+            evidence[0]["messageContent"],
+            "为什么 UNION 查询的列数必须一致？",
+        )
+        self.assertEqual(
+            evidence[0]["conversationId"],
+            "conversation-real-1",
+        )
+        self.assertEqual(evidence[0]["moduleName"], "SQL注入基础实验")
+
+    def test_ai_growth_query_does_not_turn_a_missing_task_id_into_task_zero(self):
+        executed_sql = []
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def execute(self, sql, _params):
+                executed_sql.append(sql)
+
+            def fetchall(self):
+                return []
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def cursor(self):
+                return Cursor()
+
+        with patch.object(repository, "get_connection", return_value=Connection()):
+            repository._load_growth_rows(295, None)
+
+        ai_query = next(sql for sql in executed_sql if "FROM ai_message m" in sql)
+        self.assertIn("c.task_id AS taskId", ai_query)
+        self.assertNotIn("COALESCE(c.task_id, 0)", ai_query)
+
     def test_growth_response_uses_loaded_real_rows_without_fallback_values(self):
         loaded = {
             "snapshots": [

@@ -1033,6 +1033,21 @@ export interface CapabilityGrowthEvidenceDto {
     occurredAt?: string | null;
     sourceId: string;
     sourceType: string;
+    labSessionId?: string | null;
+    conversationId?: string | null;
+    courseId?: number | null;
+    moduleId?: number | null;
+    taskId?: number | null;
+    moduleName?: string | null;
+    status?: string | null;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    durationSeconds?: number | null;
+    targetUrl?: string | null;
+    containerName?: string | null;
+    eventCount?: number;
+    eventTypes?: string[];
+    messageContent?: string | null;
 }
 
 export interface CapabilityGrowthDimensionDto {
