@@ -123,7 +123,14 @@ describe('CapabilityGrowthPanel', () => {
       data: {
         ...realGrowth,
         overall: { baselineScore: null, currentScore: null, delta: null },
-        dimensions: [],
+        dimensions: realGrowth.dimensions.map((dimension) => ({
+          ...dimension,
+          baselineScore: null,
+          currentScore: null,
+          delta: null,
+          metrics: [],
+          evidence: [],
+        })),
         history: [],
         message: '暂无真实成长数据',
       },

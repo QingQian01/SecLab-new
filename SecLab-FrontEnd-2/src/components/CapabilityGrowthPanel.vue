@@ -32,9 +32,20 @@ const selectedKey = ref<string>('knowledge_mastery')
 const chartCanvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 
-const hasGrowthData = computed(() =>
-  Boolean(props.data?.dimensions.length || props.data?.history.length),
-)
+const hasGrowthData = computed(() => {
+  const data = props.data
+  if (!data) return false
+  if (typeof data.overall.baselineScore === 'number' || typeof data.overall.currentScore === 'number') {
+    return true
+  }
+  if (data.history.length) return true
+  return data.dimensions.some((dimension) =>
+    typeof dimension.baselineScore === 'number'
+    || typeof dimension.currentScore === 'number'
+    || dimension.metrics.length > 0
+    || dimension.evidence.length > 0,
+  )
+})
 
 const selectedDimension = computed<CapabilityGrowthDimensionDto | null>(() =>
   props.data?.dimensions.find((item) => item.key === selectedKey.value)
