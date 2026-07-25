@@ -75,6 +75,114 @@ def _json_loads(value: Any) -> dict[str, Any]:
         return {}
 
 
+def _json_value(value: Any, default: Any = None) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (dict, list, int, float, bool)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return value
+
+
+def _is_correct(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    return bool(value)
+
+
+def _result_label(value: Any) -> str:
+    correct = _is_correct(value)
+    if correct is True:
+        return "正确"
+    if correct is False:
+        return "错误"
+    return "已提交"
+
+
+def _answer_display(value: Any, options: list[Any]) -> Any:
+    parsed = _json_value(value, value)
+    if isinstance(parsed, dict):
+        for key in ("answerText", "answer", "selectedOptions", "value"):
+            if parsed.get(key) is not None:
+                return _answer_display(parsed[key], options)
+        return parsed
+    if isinstance(parsed, list):
+        return [_answer_display(item, options) for item in parsed]
+    if isinstance(parsed, int) and 0 <= parsed < len(options):
+        return str(options[parsed])
+    return parsed
+
+
+def _module_label(module_id: Any) -> str:
+    return f"模块 #{module_id}" if module_id not in (None, "") else "未关联模块"
+
+
+def _course_question_record(row: dict[str, Any]) -> dict[str, Any]:
+    snapshot = _json_value(row.get("question_snapshot_json"), {})
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    options = snapshot.get("options") if isinstance(snapshot.get("options"), list) else []
+    question_uid = str(row.get("question_uid") or row.get("question_id") or "-")
+    stem = str(
+        snapshot.get("content")
+        or snapshot.get("stem")
+        or snapshot.get("question")
+        or ""
+    ).strip()
+    title = str(snapshot.get("title") or stem or f"历史题目 {question_uid}").strip()
+    correct = _is_correct(row.get("is_correct"))
+    return {
+        "id": f"course:{row.get('submission_id')}",
+        "sort_time": row.get("created_at"),
+        "sourceType": str(row.get("question_source") or "course_question"),
+        "questionId": question_uid,
+        "title": title,
+        "experiment": title,
+        "stem": stem,
+        "questionType": str(row.get("question_type") or ""),
+        "module": _module_label(row.get("module_id")),
+        "taskId": row.get("task_id"),
+        "result": _result_label(row.get("is_correct")),
+        "isCorrect": correct,
+        "score": _to_float(row.get("score")),
+        "costTime": _to_int(row.get("cost_time")) if row.get("cost_time") is not None else None,
+        "studentAnswer": _answer_display(row.get("answer_json"), options),
+        "standardAnswer": _answer_display(row.get("standard_answer_json"), options),
+        "options": [str(option) for option in options],
+        "explanation": str(snapshot.get("explanation") or snapshot.get("analysis") or "").strip(),
+        "contentAvailable": bool(stem),
+    }
+
+
+def _generated_question_record(row: dict[str, Any]) -> dict[str, Any]:
+    options_value = _json_value(row.get("options_json"), [])
+    options = options_value if isinstance(options_value, list) else []
+    title = str(row.get("title") or row.get("stem") or "专项训练题").strip()
+    return {
+        "id": f"generated:{row.get('attempt_id')}",
+        "sort_time": row.get("submitted_at"),
+        "sourceType": "generated_training",
+        "questionId": str(row.get("generated_question_id") or ""),
+        "trainingSessionId": str(row.get("training_session_id") or ""),
+        "title": title,
+        "experiment": title,
+        "stem": str(row.get("stem") or "").strip(),
+        "questionType": str(row.get("question_type") or ""),
+        "module": _module_label(row.get("module_id")),
+        "taskId": row.get("task_id"),
+        "result": _result_label(row.get("is_correct")),
+        "isCorrect": _is_correct(row.get("is_correct")),
+        "score": _to_float(row.get("score")),
+        "costTime": _to_int(row.get("cost_time")) if row.get("cost_time") is not None else None,
+        "studentAnswer": _answer_display(row.get("answer_json"), options),
+        "standardAnswer": _answer_display(row.get("standard_answer"), options),
+        "options": [str(option) for option in options],
+        "explanation": str(row.get("explanation") or "").strip(),
+        "contentAvailable": bool(row.get("stem")),
+    }
+
+
 def _fetch_one(cursor, sql: str, params: dict[str, Any]) -> dict[str, Any]:
     cursor.execute(sql, params)
     return cursor.fetchone() or {}
@@ -276,24 +384,37 @@ def _question_records(cursor, user_id: int) -> list[dict[str, Any]]:
     rows = _fetch_all(
         cursor,
         """
-        SELECT submission_id, question_id, module_id, is_correct, score, created_at
+        SELECT submission_id, question_id, question_uid, module_id, task_id,
+               question_type, question_source, question_snapshot_json,
+               answer_json, standard_answer_json, is_correct, score, cost_time, created_at
         FROM question_submission
         WHERE user_id = %(user_id)s
         ORDER BY created_at DESC
-        LIMIT 8
+        LIMIT 30
         """,
         {"user_id": user_id},
     )
-    return [
-        {
-            "sort_time": row.get("created_at"),
-            "experiment": f"问题 #{row.get('question_id')}",
-            "module": f"模块 #{row.get('module_id') or '-'}",
-            "result": "正确" if row.get("is_correct") == 1 else "错误" if row.get("is_correct") == 0 else "已提交",
-            "score": _to_float(row.get("score")),
-        }
-        for row in rows
-    ]
+    return [_course_question_record(row) for row in rows]
+
+
+def _generated_question_records(cursor, user_id: int) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        cursor,
+        """
+        SELECT a.attempt_id, a.generated_question_id, a.training_session_id,
+               a.answer_json, a.is_correct, a.score, a.cost_time, a.submitted_at,
+               q.module_id, q.task_id, q.question_type, q.title, q.stem,
+               q.options_json, q.standard_answer, q.explanation
+        FROM generated_question_attempt a
+        JOIN generated_question q
+          ON q.generated_question_id = a.generated_question_id
+        WHERE a.user_id = %(user_id)s
+        ORDER BY a.submitted_at DESC
+        LIMIT 30
+        """,
+        {"user_id": user_id},
+    )
+    return [_generated_question_record(row) for row in rows]
 
 
 def _flag_records(cursor, user_id: int) -> list[dict[str, Any]]:
@@ -310,29 +431,43 @@ def _flag_records(cursor, user_id: int) -> list[dict[str, Any]]:
     )
     return [
         {
+            "id": f"flag:{row.get('submission_id')}",
             "sort_time": row.get("created_at"),
+            "sourceType": "flag",
+            "questionId": str(row.get("task_id") or row.get("submission_id") or ""),
+            "title": f"Flag 提交 #{row.get('task_id') or row.get('submission_id')}",
             "experiment": f"Flag 提交 #{row.get('task_id') or row.get('submission_id')}",
-            "module": f"模块 #{row.get('module_id') or '-'}",
-            "result": "正确" if row.get("is_correct") == 1 else "错误",
+            "stem": "",
+            "questionType": "FLAG",
+            "module": _module_label(row.get("module_id")),
+            "taskId": row.get("task_id"),
+            "result": _result_label(row.get("is_correct")),
+            "isCorrect": _is_correct(row.get("is_correct")),
             "score": _to_float(row.get("score")),
+            "costTime": None,
+            "studentAnswer": None,
+            "standardAnswer": None,
+            "options": [],
+            "explanation": "",
+            "contentAvailable": False,
         }
         for row in rows
     ]
 
 
 def _solve_records(cursor, user_id: int) -> list[dict[str, Any]]:
-    records = _question_records(cursor, user_id) + _flag_records(cursor, user_id)
+    records = (
+        _question_records(cursor, user_id)
+        + _generated_question_records(cursor, user_id)
+        + _flag_records(cursor, user_id)
+    )
     records.sort(key=lambda item: item.get("sort_time") or datetime.min, reverse=True)
     return [
         {
-            "id": index,
-            "experiment": item["experiment"],
-            "module": item["module"],
+            **{key: value for key, value in item.items() if key != "sort_time"},
             "time": _serialize_time(item.get("sort_time")),
-            "result": item["result"],
-            "score": item["score"],
         }
-        for index, item in enumerate(records[:10], start=1)
+        for item in records[:50]
     ]
 
 

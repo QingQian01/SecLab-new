@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS `question_submission` (
   `question_type` VARCHAR(64) NOT NULL,
   `answer_json` JSON NOT NULL,
   `standard_answer_json` JSON NULL,
+  `question_snapshot_json` JSON NULL,
   `is_correct` TINYINT(1) NULL,
   `score` DECIMAL(8,2) NOT NULL DEFAULT 0,
   `cost_time` INT NULL,

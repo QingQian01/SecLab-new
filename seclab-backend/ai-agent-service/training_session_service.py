@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from statistics import mean
 from typing import Any, Optional
 from uuid import uuid4
@@ -30,6 +31,7 @@ QUESTION_SET_DEFAULT_COUNT = 7
 QUESTION_SET_MIN_COUNT = 4
 QUESTION_SET_MAX_COUNT = 8
 QUESTION_SET_RETRY_LIMIT = 2
+QUESTION_SET_TIMEOUT_SECONDS = 45.0
 
 QUESTION_ANGLES = [
     "基础概念理解",
@@ -182,37 +184,30 @@ async def generate_training_question_set(data: dict[str, Any]) -> dict[str, Any]
     return await generate_training_question_set_batch(data)
 
 
-async def generate_training_question_set_batch(data: dict[str, Any]) -> dict[str, Any]:
-    req = _normalize_question_set_request(data)
-    profile = get_latest_student_profile(req["user_id"])
-    recommendation = _extract_recommendation_context(profile, req)
-    knowledge_units = retrieve_knowledge_units(req, top_k=5)
-    example_questions = _retrieve_standard_examples(req)
-    rag_context = _build_rag_context(req, example_questions)
-    training_session_id = f"train-{uuid4()}"
-    generated_rows: list[dict[str, Any]] = []
-    previous_stems: list[str] = []
-    generator = "unknown"
-
-    for slot_index in range(1, QUESTION_SET_MAX_COUNT + 1):
-        if len(generated_rows) >= req["count"]:
-            break
-        next_index = len(generated_rows) + 1
-        angle = QUESTION_ANGLES[slot_index - 1] if slot_index <= len(QUESTION_ANGLES) else f"差异化训练 {slot_index}"
-        question = None
+async def _generate_question_rows(
+    req: dict[str, Any],
+    *,
+    knowledge_units: list[dict[str, Any]],
+    recommendation: dict[str, Any],
+    example_questions: list[dict[str, Any]],
+    rag_context: dict[str, Any],
+    training_session_id: str,
+) -> tuple[list[dict[str, Any]], str]:
+    async def generate_slot(index: int) -> tuple[int, Optional[dict[str, Any]], str]:
+        angle = QUESTION_ANGLES[index - 1] if index <= len(QUESTION_ANGLES) else f"差异化训练 {index}"
+        item_req = {
+            **req,
+            "count": 1,
+            "question_index": index,
+            "question_set_count": req["count"],
+            "question_angle": angle,
+            "previous_question_stems": [],
+            "avoid_duplicate_instruction": (
+                f"本题是训练组第 {index}/{req['count']} 题，请只围绕“{angle}”出题，"
+                "题目场景、题干结构、答案结构和评分点必须与其他角度明显不同。"
+            ),
+        }
         for _attempt in range(QUESTION_SET_RETRY_LIMIT):
-            item_req = {
-                **req,
-                "count": 1,
-                "question_index": next_index,
-                "question_set_count": req["count"],
-                "question_angle": angle,
-                "previous_question_stems": previous_stems[-6:],
-                "avoid_duplicate_instruction": (
-                    f"本题是训练组第 {next_index}/{req['count']} 题，请围绕“{angle}”出题，"
-                    "不要复用前面题目的场景、题干结构、答案结构或评分点。"
-                ),
-            }
             try:
                 llm_result = await generate_question_with_llm(
                     item_req,
@@ -221,7 +216,6 @@ async def generate_training_question_set_batch(data: dict[str, Any]) -> dict[str
                     example_questions,
                     rag_context,
                 )
-                generator = llm_result["generator"]
                 question = validate_generated_question(
                     llm_result["payload"],
                     item_req,
@@ -230,59 +224,89 @@ async def generate_training_question_set_batch(data: dict[str, Any]) -> dict[str
                     rag_context,
                     llm_result.get("difyMetadata") or {},
                 )
-                break
+                question_context = _build_set_context(
+                    req,
+                    training_session_id=training_session_id,
+                    question_index=index,
+                    question_angle=angle,
+                )
+                return (
+                    index,
+                    {
+                        "question_id": f"gq-{uuid4()}",
+                        "question_type": question["questionType"],
+                        "knowledge_point_id": _pick_knowledge_point_id(knowledge_units),
+                        "module_id": _pick_module_id(req, knowledge_units),
+                        "task_id": None,
+                        "difficulty": str(question["difficulty"]),
+                        "title": question["title"],
+                        "stem": question["stem"],
+                        "options": question.get("options"),
+                        "answer": question["standardAnswer"],
+                        "reference_answer": question["standardAnswer"],
+                        "explanation": question["explanation"],
+                        "scoring_rubric": question["gradingRubric"],
+                        "dimension": question["dimension"],
+                        "knowledgeTags": question["knowledgeTags"],
+                        "sourceKnowledgeUnitIds": question["sourceKnowledgeUnitIds"],
+                        "sourceExampleQuestionIds": question["sourceExampleQuestionIds"],
+                        "ragMode": rag_context["ragMode"],
+                        "sourceValidationMode": rag_context.get("sourceValidationMode"),
+                        "difySourceExampleQuestionIds": rag_context.get("difySourceExampleQuestionIds") or [],
+                        "validationHints": question["validationHints"],
+                        "teachingObjective": question["teachingObjective"],
+                        "expectedSkill": question["expectedSkill"],
+                        "difficultyReason": question["difficultyReason"],
+                        "commonMistakes": question["commonMistakes"],
+                        "gradingRubric": question["gradingRubric"],
+                        "qualityScore": question["qualityScore"],
+                        "qualitySummary": question["qualitySummary"],
+                        "qualityFlags": question["qualityFlags"],
+                        "generator": llm_result["generator"],
+                        "recommendationId": req["recommendation_id"],
+                        "source": req["source"],
+                        "trainingContext": question_context,
+                    },
+                    str(llm_result["generator"]),
+                )
             except Exception:
-                question = None
-        if question is None:
-            if len(generated_rows) >= QUESTION_SET_MIN_COUNT:
-                break
-            continue
+                continue
+        return index, None, ""
 
-        previous_stems.append(question["stem"])
-        question_context = _build_set_context(
-            req,
-            training_session_id=training_session_id,
-            question_index=next_index,
-            question_angle=angle,
+    results = await asyncio.gather(*(generate_slot(index) for index in range(1, req["count"] + 1)))
+    successful = sorted((item for item in results if item[1] is not None), key=lambda item: item[0])
+    rows = [item[1] for item in successful if item[1] is not None]
+    generator = next((item[2] for item in successful if item[2]), "unknown")
+    return rows, generator
+
+
+async def generate_training_question_set_batch(data: dict[str, Any]) -> dict[str, Any]:
+    req = _normalize_question_set_request(data)
+    profile = get_latest_student_profile(req["user_id"])
+    recommendation = _extract_recommendation_context(profile, req)
+    knowledge_units = retrieve_knowledge_units(req, top_k=5)
+    example_questions = _retrieve_standard_examples(req)
+    rag_context = _build_rag_context(req, example_questions)
+    training_session_id = f"train-{uuid4()}"
+    try:
+        generated_rows, generator = await asyncio.wait_for(
+            _generate_question_rows(
+                req,
+                knowledge_units=knowledge_units,
+                recommendation=recommendation,
+                example_questions=example_questions,
+                rag_context=rag_context,
+                training_session_id=training_session_id,
+            ),
+            timeout=QUESTION_SET_TIMEOUT_SECONDS,
         )
-        generated_id = f"gq-{uuid4()}"
-        generated_rows.append(
-            {
-                "question_id": generated_id,
-                "question_type": question["questionType"],
-                "knowledge_point_id": _pick_knowledge_point_id(knowledge_units),
-                "module_id": _pick_module_id(req, knowledge_units),
-                "task_id": None,
-                "difficulty": str(question["difficulty"]),
-                "title": question["title"],
-                "stem": question["stem"],
-                "options": question.get("options"),
-                "answer": question["standardAnswer"],
-                "reference_answer": question["standardAnswer"],
-                "explanation": question["explanation"],
-                "scoring_rubric": question["gradingRubric"],
-                "dimension": question["dimension"],
-                "knowledgeTags": question["knowledgeTags"],
-                "sourceKnowledgeUnitIds": question["sourceKnowledgeUnitIds"],
-                "sourceExampleQuestionIds": question["sourceExampleQuestionIds"],
-                "ragMode": rag_context["ragMode"],
-                "sourceValidationMode": rag_context.get("sourceValidationMode"),
-                "difySourceExampleQuestionIds": rag_context.get("difySourceExampleQuestionIds") or [],
-                "validationHints": question["validationHints"],
-                "teachingObjective": question["teachingObjective"],
-                "expectedSkill": question["expectedSkill"],
-                "difficultyReason": question["difficultyReason"],
-                "commonMistakes": question["commonMistakes"],
-                "gradingRubric": question["gradingRubric"],
-                "qualityScore": question["qualityScore"],
-                "qualitySummary": question["qualitySummary"],
-                "qualityFlags": question["qualityFlags"],
-                "generator": generator,
-                "recommendationId": req["recommendation_id"],
-                "source": req["source"],
-                "trainingContext": question_context,
-            }
-        )
+    except asyncio.TimeoutError as exc:
+        raise TrainingSessionServiceError(
+            "QUESTION_SET_GENERATION_TIMEOUT",
+            "训练题准备超时，请稍后重试。",
+            status_code=504,
+            details={"timeoutSeconds": int(QUESTION_SET_TIMEOUT_SECONDS)},
+        ) from exc
 
     actual_count = len(generated_rows)
     if actual_count < QUESTION_SET_MIN_COUNT:
