@@ -97,7 +97,17 @@ from teacher_course_analysis_service import (
 from teacher_learning_insight_repository import (
     get_capability_evidence,
     get_class_risk_map,
+    get_knowledge_risk_detail,
     get_learning_replay,
+)
+from capability_growth_repository import (
+    get_student_capability_growth,
+    get_teacher_student_capability_growth,
+)
+from teacher_knowledge_analysis_service import (
+    AnalysisAlreadyRunningError as KnowledgeAnalysisAlreadyRunningError,
+    KNOWLEDGE_ANALYSIS_SERVICE,
+    ProviderUnavailableError as KnowledgeProviderUnavailableError,
 )
 from teacher_intervention_repository import (
     create_intervention,
@@ -107,6 +117,7 @@ from teacher_intervention_repository import (
     list_student_assignments,
     mark_student_assignment_started,
     refresh_intervention_metrics,
+    start_student_assignment_from_snapshots,
     update_intervention_status,
 )
 import guidance_service
@@ -463,14 +474,31 @@ class TeacherInterventionCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     actionType: str
     studentIds: list[int] = Field(min_length=1)
+    courseId: Optional[int] = None
     knowledgePointId: Optional[int] = None
     description: Optional[str] = Field(default="", max_length=2000)
     questionIds: list[str] = Field(default_factory=list)
+    approvedExerciseIds: list[int] = Field(default_factory=list)
     dueAt: Optional[datetime] = None
 
 
 class TeacherInterventionStatusRequest(BaseModel):
     status: str
+
+
+class KnowledgeExerciseUpdateRequest(BaseModel):
+    questionType: Optional[str] = None
+    stem: Optional[str] = None
+    options: Optional[list[str]] = None
+    standardAnswer: Optional[str] = None
+    explanation: Optional[str] = None
+    difficulty: Optional[int] = Field(default=None, ge=1, le=5)
+    generationRationale: Optional[str] = None
+
+
+class KnowledgeExerciseReviewRequest(BaseModel):
+    status: str
+    comment: str = Field(default="", max_length=1000)
 
 
 class ErrorEventRequest(BaseModel):
@@ -622,10 +650,20 @@ def _teacher_repo_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=403, detail="当前账号无权查看该数据。")
     if isinstance(exc, AnalysisAlreadyRunningError):
         return HTTPException(status_code=409, detail="该教学班正在分析，请稍后再试。")
+    if isinstance(exc, KnowledgeAnalysisAlreadyRunningError):
+        return HTTPException(status_code=409, detail="该知识点正在分析，请稍后再试。")
     if isinstance(exc, InsufficientAnalysisDataError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, TeacherAnalysisProviderError):
-        return HTTPException(status_code=503, detail=f"{exc} 已保留上次成功结果。")
+        return HTTPException(
+            status_code=503,
+            detail="本次智能分析未生成可用结论，当前仍显示上次成功结果；原始作答统计不受影响，请稍后重试。",
+        )
+    if isinstance(exc, KnowledgeProviderUnavailableError):
+        return HTTPException(
+            status_code=503,
+            detail="本次智能分析未生成可用结论，当前仍显示上次成功结果；原始作答统计不受影响，请稍后重试。",
+        )
     if isinstance(exc, KeyError):
         return HTTPException(status_code=404, detail="请求的数据已不存在或无权访问。")
     if isinstance(exc, ValueError):
@@ -1782,6 +1820,19 @@ async def student_teacher_assignments(
         raise _repo_error(exc)
 
 
+@app.get("/api/students/{student_id}/capability-growth")
+async def student_capability_growth(
+    student_id: int,
+    teachingClassId: Optional[int] = Query(default=None),
+    current_user: dict[str, Any] = Depends(require_authenticated_user),
+):
+    _require_student_self(current_user, student_id)
+    try:
+        return get_student_capability_growth(student_id, teachingClassId)
+    except Exception as exc:
+        raise _repo_error(exc)
+
+
 @app.post("/api/students/{student_id}/teacher-assignments/{intervention_id}/start")
 async def student_start_teacher_assignment(
     student_id: int,
@@ -1797,6 +1848,9 @@ async def student_start_teacher_assignment(
                 "startedNow": False,
                 "generation": None,
             }
+        snapshot_result = start_student_assignment_from_snapshots(student_id, intervention_id)
+        if snapshot_result is not None:
+            return snapshot_result
         generation = await generate_training_question_set(
             _build_teacher_assignment_training_request(student_id, assignment)
         )
@@ -1891,6 +1945,22 @@ async def teacher_student_capability_evidence(
         raise _teacher_repo_error(exc)
 
 
+@app.get("/api/teacher/teaching-classes/{class_id}/students/{student_id}/capability-growth")
+async def teacher_student_capability_growth(
+    class_id: int,
+    student_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_teacher_student_capability_growth(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            student_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
 @app.get("/api/teacher/teaching-classes/{class_id}/students/{student_id}/learning-replay")
 async def teacher_student_learning_replay(
     class_id: int,
@@ -1923,6 +1993,125 @@ async def teacher_class_risk_map(
         raise _teacher_repo_error(exc)
 
 
+@app.get("/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks")
+async def teacher_experiment_knowledge_risks(
+    class_id: int,
+    course_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_class_risk_map(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            course_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks/{knowledge_point_id}")
+async def teacher_experiment_knowledge_risk_detail(
+    class_id: int,
+    course_id: int,
+    knowledge_point_id: int,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return get_knowledge_risk_detail(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            course_id,
+            knowledge_point_id,
+            page,
+            size,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-points/{knowledge_point_id}/ai-analysis")
+async def teacher_get_knowledge_ai_analysis(
+    class_id: int,
+    course_id: int,
+    knowledge_point_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return KNOWLEDGE_ANALYSIS_SERVICE.get_analysis(
+            int(current_user.get("user_id") or 0), class_id, course_id, knowledge_point_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.post("/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-points/{knowledge_point_id}/ai-analysis")
+async def teacher_run_knowledge_ai_analysis(
+    class_id: int,
+    course_id: int,
+    knowledge_point_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return await KNOWLEDGE_ANALYSIS_SERVICE.run_analysis(
+            int(current_user.get("user_id") or 0), class_id, course_id, knowledge_point_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.patch("/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}")
+async def teacher_update_knowledge_exercise(
+    class_id: int,
+    exercise_id: int,
+    request: KnowledgeExerciseUpdateRequest,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return KNOWLEDGE_ANALYSIS_SERVICE.update_exercise(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            exercise_id,
+            request.model_dump(exclude_none=True),
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.post("/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}/review")
+async def teacher_review_knowledge_exercise(
+    class_id: int,
+    exercise_id: int,
+    request: KnowledgeExerciseReviewRequest,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return KNOWLEDGE_ANALYSIS_SERVICE.review_exercise(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            exercise_id,
+            request.status,
+            request.comment,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.post("/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}/regenerate")
+async def teacher_regenerate_knowledge_exercise(
+    class_id: int,
+    exercise_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    try:
+        return await KNOWLEDGE_ANALYSIS_SERVICE.regenerate_exercise(
+            int(current_user.get("user_id") or 0), class_id, exercise_id,
+        )
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
 @app.get("/api/teacher/teaching-classes/{class_id}/interventions")
 async def teacher_class_interventions(
     class_id: int,
@@ -1944,12 +2133,14 @@ async def teacher_create_class_intervention(
         return create_intervention(
             teacher_id=int(current_user.get("user_id") or 0),
             class_id=class_id,
+            course_id=request.courseId,
             title=request.title,
             action_type=request.actionType,
             student_ids=request.studentIds,
             knowledge_point_id=request.knowledgePointId,
             description=request.description or "",
             question_ids=request.questionIds,
+            approved_exercise_ids=request.approvedExerciseIds,
             due_at=request.dueAt,
         )
     except Exception as exc:

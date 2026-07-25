@@ -7,9 +7,9 @@ import {
   type StudentTeacherAssignmentDto,
 } from '../../../api'
 
-const props = defineProps<{ userId: number }>()
+const props = withDefaults(defineProps<{ userId: number; initialAssignments?: StudentTeacherAssignmentDto[] | null }>(), { initialAssignments: null })
 const emit = defineEmits<{ openSession: [trainingSessionId: string] }>()
-const assignments = ref<StudentTeacherAssignmentDto[]>([])
+const assignments = ref<StudentTeacherAssignmentDto[]>(props.initialAssignments ? [...props.initialAssignments] : [])
 const loading = ref(false)
 const startingId = ref<number | null>(null)
 const error = ref('')
@@ -45,16 +45,22 @@ async function startAssignment(item: StudentTeacherAssignmentDto) {
   }
 }
 
+function statusLabel(item: StudentTeacherAssignmentDto) {
+  if (item.assignmentStatus === 'COMPLETED') return '已完成'
+  if (item.isOverdue) return '已逾期'
+  if (item.assignmentStatus === 'STARTED') return '进行中'
+  return '待开始'
+}
+
 watch(() => props.userId, () => void loadAssignments())
-onMounted(() => void loadAssignments())
+onMounted(() => { if (!props.initialAssignments) void loadAssignments() })
 </script>
 
 <template>
-  <section v-if="loading || error || assignments.length" class="card bg-base-100 border border-base-200 shadow-sm">
+  <section class="card bg-base-100 border border-base-200 shadow-sm">
     <div class="card-body gap-4">
       <div>
-        <h2 class="card-title text-lg">教师布置的专项任务</h2>
-        <p class="mt-1 text-sm text-base-content/60">完成训练后，结果会回流到教学分析，老师可查看干预前后的变化。</p>
+        <h2 class="card-title text-lg">老师布置的个性化练习</h2>
       </div>
       <div v-if="error" class="alert alert-error py-3 text-sm">{{ error }}</div>
       <div v-if="loading" class="text-sm text-base-content/50">正在读取教师布置任务…</div>
@@ -62,12 +68,15 @@ onMounted(() => void loadAssignments())
         <article v-for="item in assignments" :key="item.interventionId" class="rounded-box border border-base-200 bg-base-50 p-4">
           <div class="flex items-start justify-between gap-3">
             <div><div class="text-xs text-base-content/50">{{ item.className }} · {{ item.teacherName || '任课教师' }}</div><h3 class="mt-1 font-semibold text-base-content">{{ item.title }}</h3></div>
-            <span class="badge badge-sm" :class="item.assignmentStatus === 'COMPLETED' ? 'badge-success' : item.assignmentStatus === 'STARTED' ? 'badge-info' : 'badge-warning'">{{ item.assignmentStatus === 'COMPLETED' ? '已完成' : item.assignmentStatus === 'STARTED' ? '进行中' : '待开始' }}</span>
+            <span class="badge badge-sm" :class="item.assignmentStatus === 'COMPLETED' ? 'badge-success' : item.isOverdue ? 'badge-error' : item.assignmentStatus === 'STARTED' ? 'badge-info' : 'badge-warning'">{{ statusLabel(item) }}</span>
           </div>
           <p class="mt-3 text-sm leading-6 text-base-content/65">{{ item.description || `围绕${item.knowledgePointName || '当前薄弱知识点'}完成专项训练。` }}</p>
-          <div class="mt-3 flex flex-wrap gap-2 text-xs text-base-content/50"><span v-if="item.knowledgePointName" class="badge badge-outline badge-sm">{{ item.knowledgePointName }}</span><span>截止 {{ new Date(item.dueAt).toLocaleDateString('zh-CN') }}</span></div>
-          <button class="btn btn-primary btn-sm mt-4" :disabled="startingId === item.interventionId || item.assignmentStatus === 'COMPLETED'" @click="startAssignment(item)">{{ startingId === item.interventionId ? '正在生成专项题…' : item.trainingSessionId ? '继续训练' : '开始专项训练' }}</button>
+          <div class="mt-3 flex flex-wrap gap-2 text-xs text-base-content/50"><span v-if="item.courseName" class="badge badge-ghost badge-sm">实验：{{ item.courseName }}</span><span v-if="item.knowledgePointName" class="badge badge-outline badge-sm">知识点：{{ item.knowledgePointName }}</span></div>
+          <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-base-content/55"><span>{{ item.questionCount }} 题</span><span>预计 {{ item.estimatedMinutes }} 分钟</span><span :class="{ 'text-error font-medium': item.isOverdue }">截止 {{ new Date(item.dueAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</span></div>
+          <div v-if="item.resultSummary" class="mt-3 rounded-lg bg-success/10 px-3 py-2 text-xs text-success"><strong>作答结果</strong><span class="ml-3">完成 {{ item.resultSummary.attemptCount }} 次 · 答对 {{ item.resultSummary.correctCount }} 次 · 平均 {{ item.resultSummary.averageScore }} 分</span></div>
+          <button class="btn btn-primary btn-sm mt-4" :disabled="startingId === item.interventionId" @click="startAssignment(item)">{{ startingId === item.interventionId ? '正在准备…' : item.assignmentStatus === 'COMPLETED' ? '查看作答结果' : item.trainingSessionId ? '继续练习' : '开始练习' }}</button>
         </article>
+        <div v-if="!assignments.length" class="rounded-box border border-dashed border-base-300 p-6 text-center text-sm text-base-content/50">暂无个性化练习</div>
       </div>
     </div>
   </section>

@@ -264,12 +264,25 @@ export interface ProfileDashboardTag {
 }
 
 export interface ProfileDashboardSolveRecord {
-    id: number;
+    id: string;
+    sourceType: string;
+    questionId: string;
+    trainingSessionId?: string;
+    title: string;
     experiment: string;
+    stem: string;
+    questionType: string;
     module: string;
     time: string;
     result: string;
+    isCorrect: boolean | null;
     score: number;
+    costTime: number | null;
+    studentAnswer: unknown;
+    standardAnswer: unknown;
+    options: string[];
+    explanation: string;
+    contentAvailable: boolean;
 }
 
 export interface ProfileDashboardResponse {
@@ -862,6 +875,14 @@ export interface TeacherCourseAnalysisDto {
             knowledgePointName: string;
             evidence?: string;
             teacherAction?: string;
+            affectedStudents?: string[];
+            representativeQuestionId?: string | null;
+            representativeQuestionTitle?: string | null;
+            observedAnswer?: string | null;
+            standardAnswer?: string | null;
+            diagnosis?: string | null;
+            instruction?: string | null;
+            check?: string | null;
             incorrectQuestionCount?: number;
             affectedStudentCount?: number;
             accuracyRate?: number;
@@ -990,6 +1011,101 @@ export interface LearningReplayResponseDto {
     items: CapabilityEvidenceItemDto[];
 }
 
+export type CapabilityGrowthDimensionKey =
+    | "knowledge_mastery"
+    | "troubleshooting"
+    | "autonomy"
+    | "ai_collaboration"
+    | "engagement";
+
+export interface CapabilityGrowthMetricDto {
+    key: string;
+    label: string;
+    baselineValue?: number | null;
+    currentValue?: number | null;
+    unit: "percent" | "seconds" | "score" | string;
+    changeRate?: number | null;
+    direction: "improved" | "stable" | "declined" | "insufficient" | string;
+    baselineSampleCount: number;
+    currentSampleCount: number;
+    confidence: "high" | "moderate" | "emerging" | "insufficient" | string;
+    explanation: string;
+    sourceTypes: string[];
+    sourceRecordIds: string[];
+}
+
+export interface CapabilityGrowthEvidenceDto {
+    kind: string;
+    title: string;
+    detail?: string;
+    occurredAt?: string | null;
+    sourceId: string;
+    sourceType: string;
+    labSessionId?: string | null;
+    conversationId?: string | null;
+    courseId?: number | null;
+    moduleId?: number | null;
+    taskId?: number | null;
+    moduleName?: string | null;
+    status?: string | null;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    durationSeconds?: number | null;
+    targetUrl?: string | null;
+    containerName?: string | null;
+    eventCount?: number;
+    eventTypes?: string[];
+    messageContent?: string | null;
+}
+
+export interface CapabilityGrowthDimensionDto {
+    key: CapabilityGrowthDimensionKey;
+    label: string;
+    baselineScore?: number | null;
+    currentScore?: number | null;
+    delta?: number | null;
+    confidence: string;
+    summary: string;
+    metrics: CapabilityGrowthMetricDto[];
+    evidence: CapabilityGrowthEvidenceDto[];
+}
+
+export interface CapabilityGrowthHistoryDto {
+    snapshotId: string;
+    computedAt?: string | null;
+    overallScore?: number | null;
+    knowledge_masteryScore?: number | null;
+    troubleshootingScore?: number | null;
+    autonomyScore?: number | null;
+    ai_collaborationScore?: number | null;
+    engagementScore?: number | null;
+}
+
+export interface CapabilityGrowthResponseDto {
+    studentId: number;
+    teachingClassId?: number | null;
+    baselineComputedAt?: string | null;
+    currentComputedAt?: string | null;
+    calculationVersion: string;
+    dataProvenance: {
+        mode: string;
+        calculationVersion?: string;
+        eligibleRecordCount?: number;
+        excludedRecordCount?: number;
+        unverifiableRecordCount?: number;
+        sourceTypes?: string[];
+        snapshotIds?: string[];
+    };
+    overall: {
+        baselineScore?: number | null;
+        currentScore?: number | null;
+        delta?: number | null;
+    };
+    dimensions: CapabilityGrowthDimensionDto[];
+    history: CapabilityGrowthHistoryDto[];
+    message?: string | null;
+}
+
 export interface KnowledgeRiskItemDto {
     courseId?: number | null;
     courseName: string;
@@ -1003,14 +1119,71 @@ export interface KnowledgeRiskItemDto {
     attemptedCount: number;
     incorrectCount: number;
     incorrectRate: number;
-    riskLevel: "high" | "medium" | "low" | string;
+    errorShare?: number;
+    unansweredStudentCount?: number;
+    riskLevel: "high" | "medium" | "attention" | "good" | string;
     affectedStudents: Array<{ studentId: number; studentName: string }>;
     representativeQuestions: Array<{ generatedQuestionId: string; title: string }>;
 }
 
 export interface KnowledgeRiskMapResponseDto {
     teachingClassId: number;
+    courseId?: number | null;
     items: KnowledgeRiskItemDto[];
+}
+
+export interface KnowledgeRiskDetailDto extends KnowledgeRiskItemDto {
+    commonMistakes: Array<{ answer: string; count: number; studentCount: number }>;
+    representativeAttempts: Array<{
+        studentId: number;
+        studentName: string;
+        generatedQuestionId: string;
+        title: string;
+        answer: string;
+        standardAnswer: string;
+        score?: number | null;
+        submittedAt?: string | null;
+    }>;
+    pagination: { page: number; size: number; total: number };
+}
+
+export type KnowledgeExerciseRole = "FOUNDATION" | "CONSOLIDATION" | "TRANSFER";
+export type KnowledgeExerciseReviewStatus = "PENDING_REVIEW" | "APPROVED" | "NEEDS_REVISION" | "REJECTED";
+
+export interface KnowledgeExerciseDto {
+    exerciseId: number;
+    analysisId: number;
+    role: KnowledgeExerciseRole;
+    questionType: string;
+    stem: string;
+    options: string[];
+    standardAnswer: string;
+    explanation: string;
+    difficulty: number;
+    generationRationale: string;
+    reviewStatus: KnowledgeExerciseReviewStatus | string;
+    reviewComment: string;
+    sourceVersion: number;
+    reviewedBy?: number | null;
+    reviewedAt?: string | null;
+    updatedAt?: string | null;
+}
+
+export interface KnowledgeAiAnalysisDto {
+    teacherId: number;
+    teachingClassId: number;
+    courseId: number;
+    knowledgePointId: number;
+    analysisStatus: "IDLE" | "RUNNING" | "READY" | "FAILED" | string;
+    analysis?: {
+        overallConclusion: string;
+        commonMistakes: Array<{ title: string; reason: string }>;
+        teachingAdvice: Array<{ title: string; action: string }>;
+    } | null;
+    evidence?: Record<string, unknown> | null;
+    lastErrorMessage?: string | null;
+    generatedAt?: string | null;
+    exercises: KnowledgeExerciseDto[];
 }
 
 export type TeacherInterventionActionType = "FOCUS_GROUP" | "TARGETED_PRACTICE" | "LESSON_EXAMPLE";
@@ -1030,12 +1203,14 @@ export interface TeacherInterventionStudentDto {
         improvedDimensions: string[];
         status: string;
     };
+    resultSummary?: { attemptCount: number; correctCount: number; averageScore: number } | null;
 }
 
 export interface TeacherInterventionDto {
     interventionId: number;
     teacherId: number;
     teachingClassId: number;
+    courseId?: number | null;
     title: string;
     actionType: TeacherInterventionActionType;
     knowledgePointId?: number | null;
@@ -1058,11 +1233,16 @@ export interface TeacherInterventionDto {
 export interface StudentTeacherAssignmentDto extends TeacherInterventionDto {
     className?: string | null;
     teacherName?: string | null;
+    courseName?: string | null;
     knowledgePointName?: string | null;
     assignmentStatus: "PENDING" | "STARTED" | "COMPLETED" | string;
     trainingSessionId?: string | null;
     startedAt?: string | null;
     completedAt?: string | null;
+    questionCount: number;
+    estimatedMinutes: number;
+    isOverdue: boolean;
+    resultSummary?: { attemptCount: number; correctCount: number; averageScore: number } | null;
 }
 
 export interface TeacherUserListItemDto {
@@ -1647,7 +1827,11 @@ export async function generateTrainingQuestion(
 export async function generateTrainingQuestionSet(
     payload: TrainingQuestionSetRequest
 ): Promise<TrainingQuestionSetResponse> {
-    const response = await axios.post(`${AGENT_BASE_URL}/api/training/generate-question-set`, payload);
+    const response = await axios.post(
+        `${AGENT_BASE_URL}/api/training/generate-question-set`,
+        payload,
+        { timeout: 50_000 }
+    );
     return response.data;
 }
 
@@ -2487,6 +2671,17 @@ export async function getTeachingClassStudentCapabilityEvidence(
     return response.data;
 }
 
+export async function getTeachingClassStudentCapabilityGrowth(
+    teachingClassId: number,
+    studentId: number,
+): Promise<CapabilityGrowthResponseDto> {
+    const response = await axios.get<CapabilityGrowthResponseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/students/${studentId}/capability-growth`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
 export async function getTeachingClassStudentLearningReplay(
     teachingClassId: number,
     studentId: number,
@@ -2509,6 +2704,95 @@ export async function getTeachingClassRiskMap(
     return response.data;
 }
 
+export async function getTeachingClassExperimentRiskMap(
+    teachingClassId: number,
+    courseId: number,
+): Promise<KnowledgeRiskMapResponseDto> {
+    const response = await axios.get<KnowledgeRiskMapResponseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/experiments/${courseId}/knowledge-risks`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function getTeachingClassKnowledgeRiskDetail(
+    teachingClassId: number,
+    courseId: number,
+    knowledgePointId: number,
+    page = 1,
+    size = 20,
+): Promise<KnowledgeRiskDetailDto> {
+    const response = await axios.get<KnowledgeRiskDetailDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/experiments/${courseId}/knowledge-risks/${knowledgePointId}`,
+        { params: { page, size }, ...getTeacherAgentAuthConfig() },
+    );
+    return response.data;
+}
+
+export async function getKnowledgePointAiAnalysis(
+    teachingClassId: number,
+    courseId: number,
+    knowledgePointId: number,
+): Promise<KnowledgeAiAnalysisDto> {
+    const response = await axios.get<KnowledgeAiAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/experiments/${courseId}/knowledge-points/${knowledgePointId}/ai-analysis`,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function startKnowledgePointAiAnalysis(
+    teachingClassId: number,
+    courseId: number,
+    knowledgePointId: number,
+): Promise<KnowledgeAiAnalysisDto> {
+    const response = await axios.post<KnowledgeAiAnalysisDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/experiments/${courseId}/knowledge-points/${knowledgePointId}/ai-analysis`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function updateKnowledgeExercise(
+    teachingClassId: number,
+    exerciseId: number,
+    payload: Partial<Pick<KnowledgeExerciseDto, "questionType" | "stem" | "options" | "standardAnswer" | "explanation" | "difficulty" | "generationRationale">>,
+): Promise<KnowledgeExerciseDto> {
+    const response = await axios.patch<KnowledgeExerciseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/knowledge-exercises/${exerciseId}`,
+        payload,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function reviewKnowledgeExercise(
+    teachingClassId: number,
+    exerciseId: number,
+    status: Exclude<KnowledgeExerciseReviewStatus, "PENDING_REVIEW">,
+    comment = "",
+): Promise<KnowledgeExerciseDto> {
+    const response = await axios.post<KnowledgeExerciseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/knowledge-exercises/${exerciseId}/review`,
+        { status, comment },
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
+export async function regenerateKnowledgeExercise(
+    teachingClassId: number,
+    exerciseId: number,
+): Promise<KnowledgeExerciseDto> {
+    const response = await axios.post<KnowledgeExerciseDto>(
+        `${AGENT_BASE_URL}/api/teacher/teaching-classes/${teachingClassId}/knowledge-exercises/${exerciseId}/regenerate`,
+        null,
+        getTeacherAgentAuthConfig(),
+    );
+    return response.data;
+}
+
 export async function getTeachingClassInterventions(
     teachingClassId: number,
 ): Promise<{ teachingClassId: number; items: TeacherInterventionDto[] }> {
@@ -2525,9 +2809,11 @@ export async function createTeachingClassIntervention(
         title: string;
         actionType: TeacherInterventionActionType;
         studentIds: number[];
+        courseId?: number | null;
         knowledgePointId?: number | null;
         description?: string;
         questionIds?: string[];
+        approvedExerciseIds?: number[];
         dueAt?: string | null;
     },
 ): Promise<TeacherInterventionDto> {
@@ -2570,6 +2856,20 @@ export async function getStudentTeacherAssignments(
     const response = await axios.get(
         `${AGENT_BASE_URL}/api/students/${studentId}/teacher-assignments`,
         getBearerAuthConfig("当前没有登录态 token，无法读取教师布置任务。"),
+    );
+    return response.data;
+}
+
+export async function getStudentCapabilityGrowth(
+    studentId: number,
+    teachingClassId?: number,
+): Promise<CapabilityGrowthResponseDto> {
+    const response = await axios.get<CapabilityGrowthResponseDto>(
+        `${AGENT_BASE_URL}/api/students/${studentId}/capability-growth`,
+        {
+            params: teachingClassId == null ? undefined : { teachingClassId },
+            ...getBearerAuthConfig("当前没有登录态 token，无法读取能力成长数据。"),
+        },
     );
     return response.data;
 }

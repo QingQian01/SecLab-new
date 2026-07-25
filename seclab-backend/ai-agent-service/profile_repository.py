@@ -141,6 +141,16 @@ CREATE TABLE IF NOT EXISTS student_profile_feature_daily (
 
 _schema_ready = False
 
+CALCULATION_VERSION = "capability-growth-v1"
+NON_PRODUCTION_SOURCE_TOKENS = (
+    "showcase-seed",
+    "static-fallback",
+    "mock",
+    "demo",
+    "test",
+    "seed",
+)
+
 OVERALL_WEIGHTS = {
     "knowledge_mastery_score": 0.30,
     "troubleshooting_score": 0.20,
@@ -164,6 +174,95 @@ DIMENSION_CODES = {
     "ai_collaboration_score": "ai_collaboration",
     "engagement_score": "engagement",
 }
+
+
+def is_production_source(value: Any) -> bool:
+    normalized = str(value or "").strip().lower()
+    return bool(normalized) and not any(
+        token in normalized for token in NON_PRODUCTION_SOURCE_TOKENS
+    )
+
+
+def build_data_provenance(
+    source_counts: dict[str, int],
+    eligible_record_count: int,
+    excluded_record_count: int,
+    unverifiable_record_count: int,
+) -> dict[str, Any]:
+    clean_source_counts = {
+        str(source): max(0, int(count or 0))
+        for source, count in source_counts.items()
+        if str(source or "").strip() and int(count or 0) > 0
+    }
+    production_sources = sorted(
+        source for source in clean_source_counts if is_production_source(source)
+    )
+    excluded_sources = sorted(
+        source for source in clean_source_counts if not is_production_source(source)
+    )
+    eligible_count = max(0, int(eligible_record_count or 0))
+    excluded_count = max(0, int(excluded_record_count or 0))
+    unverifiable_count = max(0, int(unverifiable_record_count or 0))
+    is_clean = (
+        eligible_count > 0
+        and excluded_count == 0
+        and unverifiable_count == 0
+    )
+    return {
+        "mode": "production_events" if is_clean else "mixed_or_insufficient_data",
+        "calculationVersion": CALCULATION_VERSION,
+        "eligibleRecordCount": eligible_count,
+        "excludedRecordCount": excluded_count,
+        "unverifiableRecordCount": unverifiable_count,
+        "excludedReasons": excluded_sources,
+        "sourceTypes": production_sources,
+        "sourceCounts": clean_source_counts,
+    }
+
+
+def summarize_source_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: dict[str, int] = defaultdict(int)
+    eligible_count = 0
+    excluded_count = 0
+    unverifiable_count = 0
+    for row in rows:
+        count = max(0, int(row.get("record_count") or 0))
+        source = str(row.get("source") or "").strip()
+        if not source:
+            unverifiable_count += count
+            continue
+        source_counts[source] += count
+        if is_production_source(source):
+            eligible_count += count
+        else:
+            excluded_count += count
+    return build_data_provenance(
+        dict(source_counts),
+        eligible_count,
+        excluded_count,
+        unverifiable_count,
+    )
+
+
+def is_growth_eligible_snapshot(snapshot: dict[str, Any]) -> bool:
+    summary = snapshot.get("profile_summary_json")
+    if isinstance(summary, str):
+        try:
+            summary = json.loads(summary)
+        except (TypeError, json.JSONDecodeError):
+            return False
+    if not isinstance(summary, dict):
+        return False
+    provenance = summary.get("data_provenance")
+    if not isinstance(provenance, dict):
+        return False
+    return (
+        provenance.get("mode") == "production_events"
+        and provenance.get("calculationVersion") == CALCULATION_VERSION
+        and int(provenance.get("eligibleRecordCount") or 0) > 0
+        and int(provenance.get("excludedRecordCount") or 0) == 0
+        and int(provenance.get("unverifiableRecordCount") or 0) == 0
+    )
 
 DIMENSION_BREAKDOWN = {
     "knowledge_mastery_score": {
@@ -258,6 +357,103 @@ def _fetch_one(cursor, sql: str, params: dict[str, Any]) -> dict[str, Any]:
 def _fetch_all(cursor, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     cursor.execute(sql, params)
     return list(cursor.fetchall() or [])
+
+
+def _collect_data_provenance(cursor, user_id: int) -> dict[str, Any]:
+    rows = _fetch_all(
+        cursor,
+        """
+        SELECT source, COUNT(*) AS record_count
+        FROM (
+            SELECT NULLIF(TRIM(question_source), '') AS source
+            FROM question_submission
+            WHERE user_id = %(user_id)s
+
+            UNION ALL
+            SELECT NULLIF(TRIM(ts.source_type), '') AS source
+            FROM generated_question_attempt gqa
+            LEFT JOIN training_session ts
+              ON ts.training_session_id = gqa.training_session_id
+            WHERE gqa.user_id = %(user_id)s
+              AND gqa.submission_id IS NULL
+
+            UNION ALL
+            SELECT COALESCE(
+                (
+                    SELECT NULLIF(TRIM(le.source), '')
+                    FROM learning_event le
+                    WHERE le.lab_session_id = fs.lab_session_id
+                    ORDER BY le.event_time ASC
+                    LIMIT 1
+                ),
+                (
+                    SELECT NULLIF(TRIM(cce.source), '')
+                    FROM container_command_event cce
+                    WHERE cce.lab_session_id = fs.lab_session_id
+                    ORDER BY cce.executed_at ASC
+                    LIMIT 1
+                )
+            ) AS source
+            FROM flag_submission fs
+            WHERE fs.user_id = %(user_id)s
+
+            UNION ALL
+            SELECT COALESCE(
+                (
+                    SELECT NULLIF(TRIM(le.source), '')
+                    FROM learning_event le
+                    WHERE le.lab_session_id = ls.session_id
+                    ORDER BY le.event_time ASC
+                    LIMIT 1
+                ),
+                (
+                    SELECT NULLIF(TRIM(cce.source), '')
+                    FROM container_command_event cce
+                    WHERE cce.lab_session_id = ls.session_id
+                    ORDER BY cce.executed_at ASC
+                    LIMIT 1
+                )
+            ) AS source
+            FROM lab_session ls
+            WHERE ls.user_id = %(user_id)s
+
+            UNION ALL
+            SELECT NULLIF(TRIM(c.source), '') AS source
+            FROM ai_message m
+            JOIN ai_conversation c ON c.conversation_id = m.conversation_id
+            WHERE c.user_id = %(user_id)s
+
+            UNION ALL
+            SELECT NULLIF(TRIM(c.source), '') AS source
+            FROM ai_context_injection ci
+            JOIN ai_conversation c ON c.conversation_id = ci.conversation_id
+            WHERE c.user_id = %(user_id)s
+
+            UNION ALL
+            SELECT NULLIF(TRIM(source), '') AS source
+            FROM learning_event
+            WHERE user_id = %(user_id)s
+
+            UNION ALL
+            SELECT NULLIF(TRIM(source), '') AS source
+            FROM container_command_event
+            WHERE user_id = %(user_id)s
+
+            UNION ALL
+            SELECT NULLIF(TRIM(source), '') AS source
+            FROM container_file_event
+            WHERE user_id = %(user_id)s
+
+            UNION ALL
+            SELECT NULLIF(TRIM(source), '') AS source
+            FROM error_event
+            WHERE user_id = %(user_id)s
+        ) provenance_sources
+        GROUP BY source
+        """,
+        {"user_id": user_id},
+    )
+    return summarize_source_rows(rows)
 
 
 def _collect_source_range(cursor, user_id: int) -> tuple[Optional[datetime], Optional[datetime]]:
@@ -1032,6 +1228,7 @@ def rebuild_student_profile(user_id: int) -> dict[str, Any]:
         with conn.cursor() as cursor:
             source_start, source_end = _collect_source_range(cursor, user_id)
             stats = _collect_stats(cursor, user_id)
+            data_provenance = _collect_data_provenance(cursor, user_id)
             scores, explanations = _score_profile(stats)
             strengths, weaknesses = _strengths_and_weaknesses(scores)
             catalog = _load_catalog_resources(cursor)
@@ -1064,6 +1261,7 @@ def rebuild_student_profile(user_id: int) -> dict[str, Any]:
                 "strengths": strengths,
                 "weaknesses": weaknesses,
                 "recommendations": recommendations,
+                "data_provenance": data_provenance,
             }
             snapshot_id = f"profile-{uuid4()}"
             row = {

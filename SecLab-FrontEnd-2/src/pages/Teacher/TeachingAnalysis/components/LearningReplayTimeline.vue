@@ -7,7 +7,7 @@ defineProps<{ items: CapabilityEvidenceItemDto[] }>()
 
 <template>
   <section class="replay-block">
-    <div class="section-heading"><h3>安全实验学习回放</h3><p>按时间还原“开始实验—遇到问题—请求帮助—修改方案—验证成功”的完整过程。</p></div>
+    <div class="section-heading"><h3>安全实验学习回放</h3></div>
     <div v-if="items.length" class="timeline">
       <article v-for="item in items" :key="`${item.kind}-${item.sourceId}`" :class="`tone-${getTimelineEventPresentation(item.kind, item.retryOutcome || item.status).tone}`">
         <div class="time">{{ item.occurredAt ? new Date(item.occurredAt).toLocaleString('zh-CN') : '时间未记录' }}</div>

@@ -34,11 +34,14 @@ def normalize_display_text(value: Any, fallback: str = "") -> str:
 
 
 def classify_risk(attempted_student_count: int, incorrect_student_count: int, incorrect_rate: float) -> str:
-    if incorrect_student_count >= 8 or (attempted_student_count >= 5 and incorrect_rate >= 0.55):
+    del attempted_student_count, incorrect_student_count
+    if incorrect_rate >= 0.60:
         return "high"
-    if incorrect_student_count >= 4 or (attempted_student_count >= 5 and incorrect_rate >= 0.30):
+    if incorrect_rate >= 0.40:
         return "medium"
-    return "low"
+    if incorrect_rate >= 0.20:
+        return "attention"
+    return "good"
 
 
 def match_knowledge_course(category: Any, courses: list[dict[str, Any]]) -> dict[str, Any]:
@@ -403,7 +406,126 @@ def _split_pairs(value: Any, key_name: str, value_name: str) -> list[dict[str, A
     return items
 
 
-def get_class_risk_map(teacher_id: int, class_id: int) -> dict[str, Any]:
+def build_knowledge_risk_items(
+    rows: Iterable[dict[str, Any]],
+    course_id: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    scoped_rows = [
+        row for row in rows
+        if course_id is None or int(row.get("course_id") or 0) == int(course_id)
+    ]
+    total_incorrect = sum(max(0, int(row.get("incorrect_count") or 0)) for row in scoped_rows)
+    items: list[dict[str, Any]] = []
+    for row in scoped_rows:
+        attempted_count = int(row.get("attempted_count") or 0)
+        incorrect_count = int(row.get("incorrect_count") or 0)
+        attempted_students = int(row.get("attempted_student_count") or 0)
+        incorrect_students = int(row.get("incorrect_student_count") or 0)
+        incorrect_rate = round(incorrect_count / attempted_count, 4) if attempted_count else 0.0
+        items.append(
+            {
+                "courseId": row.get("course_id"),
+                "courseName": row.get("course_name") or "未命名实验",
+                "teachingOrder": row.get("teaching_order"),
+                "knowledgePointId": row.get("knowledge_point_id"),
+                "knowledgePointName": row.get("knowledge_point_name"),
+                "knowledgeCategory": row.get("knowledge_category"),
+                "studentCount": int(row.get("student_count") or 0),
+                "attemptedStudentCount": attempted_students,
+                "incorrectStudentCount": incorrect_students,
+                "unansweredStudentCount": max(0, int(row.get("student_count") or 0) - attempted_students),
+                "attemptedCount": attempted_count,
+                "incorrectCount": incorrect_count,
+                "incorrectRate": incorrect_rate,
+                "errorShare": round(incorrect_count / total_incorrect, 4) if total_incorrect else 0.0,
+                "riskLevel": classify_risk(attempted_students, incorrect_students, incorrect_rate),
+                "affectedStudents": _split_pairs(row.get("affected_students"), "studentId", "studentName"),
+                "representativeQuestions": _split_pairs(
+                    row.get("representative_questions"),
+                    "generatedQuestionId",
+                    "title",
+                )[:3],
+            }
+        )
+    risk_order = {"high": 0, "medium": 1, "attention": 2, "good": 3}
+    items.sort(key=lambda item: (
+        risk_order.get(str(item.get("riskLevel")), 4),
+        -int(item.get("incorrectCount") or 0),
+        str(item.get("knowledgePointName") or ""),
+    ))
+    return items
+
+
+def _answer_text(value: Any) -> str:
+    if value is None:
+        return "未提供答案"
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return value.strip() or "未提供答案"
+        if isinstance(parsed, str):
+            return parsed.strip() or "未提供答案"
+        return json.dumps(parsed, ensure_ascii=False, sort_keys=True)
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def build_knowledge_risk_detail(
+    *,
+    summary: dict[str, Any],
+    attempt_rows: Iterable[dict[str, Any]],
+    page: int = 1,
+    size: int = 20,
+) -> dict[str, Any]:
+    rows = list(attempt_rows)
+    groups: dict[str, dict[str, Any]] = {}
+    students: dict[int, dict[str, Any]] = {}
+    representative_attempts: list[dict[str, Any]] = []
+    for row in rows:
+        answer = _answer_text(row.get("answer_json"))
+        student_id = int(row.get("student_id") or 0)
+        student_name = row.get("student_name") or f"学生 {student_id}"
+        students.setdefault(student_id, {"studentId": student_id, "studentName": student_name})
+        group = groups.setdefault(answer, {"answer": answer, "count": 0, "studentIds": set()})
+        group["count"] += 1
+        group["studentIds"].add(student_id)
+        representative_attempts.append(
+            {
+                "studentId": student_id,
+                "studentName": student_name,
+                "generatedQuestionId": row.get("generated_question_id"),
+                "title": row.get("title") or "未命名题目",
+                "answer": answer,
+                "standardAnswer": _answer_text(row.get("standard_answer")),
+                "score": row.get("score"),
+                "submittedAt": _iso(row.get("submitted_at")),
+            }
+        )
+    common_mistakes = [
+        {"answer": value["answer"], "count": value["count"], "studentCount": len(value["studentIds"])}
+        for value in groups.values()
+    ]
+    common_mistakes.sort(key=lambda item: (-item["studentCount"], -item["count"], item["answer"]))
+    student_items = sorted(students.values(), key=lambda item: (item["studentName"], item["studentId"]))
+    page = max(1, int(page))
+    size = max(1, min(int(size), 100))
+    offset = (page - 1) * size
+    return {
+        **summary,
+        "commonMistakes": common_mistakes,
+        "affectedStudents": student_items[offset:offset + size],
+        "representativeAttempts": representative_attempts[:10],
+        "pagination": {"page": page, "size": size, "total": len(student_items)},
+    }
+
+
+def get_class_risk_map(
+    teacher_id: int,
+    class_id: int,
+    course_id: Optional[int] = None,
+) -> dict[str, Any]:
     from teacher_repository import require_owned_teaching_class
 
     require_owned_teaching_class(teacher_id, class_id)
@@ -427,9 +549,13 @@ def get_class_risk_map(teacher_id: int, class_id: int) -> dict[str, Any]:
                 }
                 for row in cursor.fetchall() or []
             ]
+            course_filter = "AND ts.course_id = %(course_id)s" if course_id is not None else ""
             cursor.execute(
                 f"""
                 SELECT
+                    ts.course_id,
+                    c.course_name,
+                    tcc.teaching_order,
                     gq.knowledge_point_id,
                     COALESCE(kp.name, '未标注知识点') AS knowledge_point_name,
                     COALESCE(kp.category, '未分类') AS knowledge_category,
@@ -453,51 +579,75 @@ def get_class_risk_map(teacher_id: int, class_id: int) -> dict[str, Any]:
                 INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs
                   ON tcs.student_id = ts.user_id
                  AND tcs.teaching_class_id = %(class_id)s
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_course` tcc
+                  ON tcc.teaching_class_id = %(class_id)s
+                 AND tcc.course_id = ts.course_id
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`course` c
+                  ON c.id = ts.course_id
                 LEFT JOIN generated_question_attempt gqa
                   ON gqa.generated_question_id = gq.generated_question_id
                 LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u
                   ON u.user_id = gqa.user_id
                 LEFT JOIN knowledge_point kp
                   ON kp.knowledge_point_id = gq.knowledge_point_id
-                GROUP BY gq.knowledge_point_id, kp.name, kp.category
+                WHERE 1 = 1
+                  {course_filter}
+                GROUP BY ts.course_id, c.course_name, tcc.teaching_order,
+                         gq.knowledge_point_id, kp.name, kp.category
                 ORDER BY incorrect_student_count DESC, knowledge_point_name
                 """,
-                {"class_id": class_id},
+                {"class_id": class_id, "course_id": course_id},
             )
             rows = list(cursor.fetchall() or [])
 
-    result_items = []
-    for row in rows:
-        attempted_count = int(row.get("attempted_count") or 0)
-        incorrect_count = int(row.get("incorrect_count") or 0)
-        attempted_students = int(row.get("attempted_student_count") or 0)
-        incorrect_students = int(row.get("incorrect_student_count") or 0)
-        incorrect_rate = round(incorrect_count / attempted_count, 4) if attempted_count else 0.0
-        matched_course = match_knowledge_course(row.get("knowledge_category"), courses)
-        result_items.append(
-            {
-                **matched_course,
-                "knowledgePointId": row.get("knowledge_point_id"),
-                "knowledgePointName": row.get("knowledge_point_name"),
-                "knowledgeCategory": row.get("knowledge_category"),
-                "studentCount": int(row.get("student_count") or 0),
-                "attemptedStudentCount": attempted_students,
-                "incorrectStudentCount": incorrect_students,
-                "attemptedCount": attempted_count,
-                "incorrectCount": incorrect_count,
-                "incorrectRate": incorrect_rate,
-                "riskLevel": classify_risk(attempted_students, incorrect_students, incorrect_rate),
-                "affectedStudents": _split_pairs(row.get("affected_students"), "studentId", "studentName"),
-                "representativeQuestions": _split_pairs(
-                    row.get("representative_questions"),
-                    "generatedQuestionId",
-                    "title",
-                )[:3],
-            }
-        )
-    result_items.sort(key=lambda item: (
-        item.get("teachingOrder") if item.get("teachingOrder") is not None else 999,
-        {"high": 0, "medium": 1, "low": 2}.get(str(item.get("riskLevel")), 3),
-        str(item.get("knowledgePointName") or ""),
-    ))
-    return {"teachingClassId": class_id, "items": result_items}
+    result_items = build_knowledge_risk_items(rows, course_id=course_id)
+    return {"teachingClassId": class_id, "courseId": course_id, "items": result_items}
+
+
+def get_knowledge_risk_detail(
+    teacher_id: int,
+    class_id: int,
+    course_id: int,
+    knowledge_point_id: int,
+    page: int = 1,
+    size: int = 20,
+) -> dict[str, Any]:
+    risk_map = get_class_risk_map(teacher_id, class_id, course_id)
+    summary = next(
+        (item for item in risk_map["items"] if int(item.get("knowledgePointId") or 0) == int(knowledge_point_id)),
+        None,
+    )
+    if not summary:
+        raise KeyError("knowledge point risk does not exist in selected experiment")
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT gqa.user_id AS student_id,
+                       COALESCE(u.user_name, u.user_student_number, '未命名学生') AS student_name,
+                       gqa.answer_json, gqa.score, gqa.submitted_at,
+                       gq.generated_question_id, gq.title,
+                       COALESCE(gq.reference_answer, gq.explanation, '') AS standard_answer
+                FROM generated_question_attempt gqa
+                INNER JOIN generated_question gq
+                  ON gq.generated_question_id = gqa.generated_question_id
+                INNER JOIN training_session ts
+                  ON ts.training_session_id = gq.training_session_id
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs
+                  ON tcs.teaching_class_id = %(class_id)s
+                 AND tcs.student_id = gqa.user_id
+                LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u
+                  ON u.user_id = gqa.user_id
+                WHERE ts.course_id = %(course_id)s
+                  AND gq.knowledge_point_id = %(knowledge_point_id)s
+                  AND gqa.is_correct = 0
+                ORDER BY gqa.submitted_at DESC, gqa.attempt_id DESC
+                """,
+                {
+                    "class_id": class_id,
+                    "course_id": course_id,
+                    "knowledge_point_id": knowledge_point_id,
+                },
+            )
+            rows = list(cursor.fetchall() or [])
+    return build_knowledge_risk_detail(summary=summary, attempt_rows=rows, page=page, size=size)

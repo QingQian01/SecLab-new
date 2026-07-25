@@ -293,14 +293,24 @@ def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
         return value if isinstance(value, dict) else None
     except json.JSONDecodeError:
         pass
-    match = re.search(r"\{.*\}", text, flags=re.S)
-    if not match:
+
+    # Reasoning models may emit a <think> block containing a draft JSON object
+    # before the final answer. Decode every complete object and select the one
+    # that finishes latest in the response instead of greedily spanning from
+    # the first opening brace to the last closing brace.
+    decoder = json.JSONDecoder()
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for match in re.finditer(r"\{", text):
+        try:
+            value, relative_end = decoder.raw_decode(text[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            candidates.append((match.start() + relative_end, match.start(), value))
+    if not candidates:
         return None
-    try:
-        value = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    return value if isinstance(value, dict) else None
+    _, _, value = max(candidates, key=lambda item: (item[0], -item[1]))
+    return value
 
 
 async def _parse_dify_streaming_answer(response: httpx.Response, *, max_seconds: float = 45.0) -> str:

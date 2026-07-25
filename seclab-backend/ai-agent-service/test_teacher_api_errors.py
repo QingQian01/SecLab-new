@@ -8,6 +8,34 @@ from teacher_ai_analysis_service import provider_failure_message
 
 
 class TeacherApiErrorTest(unittest.TestCase):
+    def test_experiment_risk_routes_are_registered_without_teacher_id_parameters(self):
+        paths = {route.path for route in main.app.routes}
+
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-risks/{knowledge_point_id}",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/experiments/{course_id}/knowledge-points/{knowledge_point_id}/ai-analysis",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}/review",
+            paths,
+        )
+        self.assertIn(
+            "/api/teacher/teaching-classes/{class_id}/knowledge-exercises/{exercise_id}/regenerate",
+            paths,
+        )
+
     def test_teacher_auth_loads_owned_teaching_classes(self):
         connection = _FakeConnection(
             user={
@@ -41,6 +69,22 @@ class TeacherApiErrorTest(unittest.TestCase):
         self.assertEqual((forbidden.status_code, forbidden.detail), (403, "当前账号无权查看该数据。"))
         self.assertEqual((missing.status_code, missing.detail), (404, "请求的数据已不存在或无权访问。"))
 
+    def test_provider_format_failure_returns_a_useful_business_status(self):
+        error = main._teacher_repo_error(
+            main.TeacherAnalysisProviderError(
+                "Dify 已返回内容，但结果格式不符合教学分析要求，请检查 Agent 提示词。"
+            )
+        )
+
+        self.assertEqual(error.status_code, 503)
+        self.assertEqual(
+            error.detail,
+            "本次智能分析未生成可用结论，当前仍显示上次成功结果；原始作答统计不受影响，请稍后重试。",
+        )
+        self.assertNotIn("Dify", error.detail)
+        self.assertNotIn("Agent", error.detail)
+        self.assertNotIn("格式", error.detail)
+
     def test_student_assignment_scope_accepts_self_and_rejects_another_student(self):
         context = {"user_id": 261, "role": "student"}
 
@@ -64,6 +108,19 @@ class TeacherApiErrorTest(unittest.TestCase):
         self.assertEqual(payload["knowledge_tags"], ["SQL盲注"])
         self.assertEqual(payload["source"], "teacher_assignment")
         self.assertEqual(payload["count"], 5)
+
+    def test_intervention_request_carries_approved_exercise_scope(self):
+        request = main.TeacherInterventionCreateRequest(
+            title="联合查询专项练习",
+            actionType="TARGETED_PRACTICE",
+            studentIds=[261, 262],
+            courseId=7,
+            knowledgePointId=71,
+            approvedExerciseIds=[31, 32],
+        )
+
+        self.assertEqual(request.courseId, 7)
+        self.assertEqual(request.approvedExerciseIds, [31, 32])
 
 
 class AiAnalysisHealthTest(unittest.IsolatedAsyncioTestCase):
