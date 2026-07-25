@@ -403,11 +403,11 @@ async function persistAiInteractionEvent(userQuestion: string, assistantReply: s
 }
 
 // ── 一键提示 ─────────────────────────────────────────────────────
+// 面向学习者的简洁文案：不暴露"容器""日志""上下文"等技术字眼，
+// 让聊天界面更直观。容器日志由后端根据 container_name 自动读取
+// 并 base64 编码附加到 query，前端无需在此拼接。
 const sendHint = () => {
-  const container = props.labContainer || 'sqli-lab-web-1'
-  const contextText = labContextText.value ? `\n\n当前实验上下文：\n${labContextText.value}` : ''
-  inputMessage.value =
-    `请帮我读取 ${container} 容器的最新50行日志，结合当前实验上下文分析我的操作进展，并给出针对性的提示。${contextText}`
+  inputMessage.value = '请根据我最近的几次操作，给出我接下来需要怎么做的提示'
   handleSendMessage()
   emit('hint-sent')
 }
@@ -501,11 +501,14 @@ const scrollToBottom = () => {
 const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
   messages.value[messageIndex].isStreaming = true
   messages.value[messageIndex].streamContent = ''
-  messages.value[messageIndex].showThinking = true
+  messages.value[messageIndex].showThinking = false
   messages.value[messageIndex].thinking = ''
 
   let completeResponse = ''
   let completeThinking = ''
+  // Dify Agent 的 answer 里可能包含 <think>...</think> 思考过程标签，
+  // 需要流式过滤，只把实际回答拼入 completeResponse。
+  let inThinkBlock = false
 
   try {
     // 出站模式：把当前靶机容器名传给后端，后端读日志拼进 query，
@@ -558,14 +561,8 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
             conversationId.value = chunk.conversation_id
           }
 
-          // Agent 思考步骤（tool 调用过程）
+          // Agent 思考步骤（仅保留工具调用卡片，不显示纯思考文字）
           if (chunk.event === 'agent_thought') {
-            // 纯思考文字（无工具调用时）
-            if (chunk.thought && !chunk.tool) {
-              completeThinking += chunk.thought + '\n'
-              messages.value[messageIndex].thinking = completeThinking
-            }
-
             // 工具调用 → 可视化卡片
             if (chunk.tool) {
               const tcId = chunk.id || `tc-${Date.now()}-${Math.random()}`
@@ -593,13 +590,44 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
             }
           }
 
-          // 流式回答文本片段
+          // 流式回答文本片段（过滤 <think>...</think> 思考过程）
           if (chunk.event === 'agent_message' || chunk.event === 'message') {
-            const delta = chunk.answer ?? ''
+            let delta = chunk.answer ?? ''
             if (delta) {
-              completeResponse += delta
-              messages.value[messageIndex].streamContent = completeResponse
-              nextTick(() => scrollToBottom())
+              // 流式过滤 <think> 标签：标签可能跨多个分片
+              while (delta) {
+                if (inThinkBlock) {
+                  // 在 think 块内，寻找 </think> 结束标记
+                  const endIdx = delta.indexOf('</think>')
+                  if (endIdx >= 0) {
+                    inThinkBlock = false
+                    delta = delta.substring(endIdx + 8)
+                  } else {
+                    delta = ''  // 整个分片都在 think 块内，丢弃
+                  }
+                }
+                if (!inThinkBlock && delta) {
+                  const startIdx = delta.indexOf('<think>')
+                  if (startIdx >= 0) {
+                    const endIdx = delta.indexOf('</think>', startIdx)
+                    if (endIdx >= 0) {
+                      // 同一分片内闭合，去掉 think 块，继续处理剩余部分
+                      delta = delta.substring(0, startIdx) + delta.substring(endIdx + 8)
+                    } else {
+                      // think 块开始但未闭合
+                      inThinkBlock = true
+                      delta = delta.substring(0, startIdx)
+                    }
+                  } else {
+                    break  // 没有 think 标签，正常处理
+                  }
+                }
+              }
+              if (delta) {
+                completeResponse += delta
+                messages.value[messageIndex].streamContent = completeResponse
+                nextTick(() => scrollToBottom())
+              }
             }
           }
 
@@ -917,9 +945,9 @@ watch(guidanceAlerts, () => {
 }
 
 .assistant-bubble {
-  background-color: #ffffff;
-  color: #1f2937;
-  border: 1px solid #e5e7eb;
+  background-color: var(--color-base-100);
+  color: var(--color-base-content);
+  border: 1px solid var(--color-base-300);
 }
 
 .assistant-bubble :deep(.markdown-body),
@@ -929,13 +957,13 @@ watch(guidanceAlerts, () => {
 .assistant-bubble :deep(.markdown-body h2),
 .assistant-bubble :deep(.markdown-body h3),
 .assistant-bubble :deep(.markdown-body blockquote) {
-  color: #1f2937;
+  color: var(--color-base-content);
 }
 
 .assistant-bubble :deep(.markdown-body code),
 .assistant-bubble :deep(.markdown-body pre) {
-  background-color: #f3f4f6;
-  color: #111827;
+  background-color: var(--color-base-200);
+  color: var(--color-base-content);
 }
 
 :deep(.chat-bubble a) {

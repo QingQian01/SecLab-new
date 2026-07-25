@@ -35,28 +35,28 @@ const isError = computed(() => message.value.includes('失败') || message.value
 }
 
 .alert {
-  background-color: rgba(255, 255, 255, 0.95);
+  background-color: var(--color-base-100);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   border-radius: 8px;
   padding: 1rem 1.5rem;
   font-size: 1.1rem;
   border-left: 4px solid;
-  color: #111827 !important;
+  color: var(--color-base-content) !important;
 }
 
 .alert-info {
   border-color: var(--color-primary, #3b82f6);
-  color: #111827 !important;
+  color: var(--color-base-content) !important;
 }
 
 .alert-error {
   border-color: var(--color-error, #ef4444);
-  background-color: rgba(254, 226, 226, 0.95);
-  color: #111827 !important;
+  background-color: color-mix(in srgb, var(--color-error) 15%, var(--color-base-100));
+  color: var(--color-base-content) !important;
 }
 
 .alert :deep(*) {
-  color: #111827 !important;
+  color: var(--color-base-content) !important;
 }
 
 @keyframes toast-appear {

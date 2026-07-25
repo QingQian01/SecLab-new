@@ -128,3 +128,30 @@ INSERT IGNORE INTO `module_course` (`module_id`, `course_id`) VALUES
 (1, 1),
 (2, 2),
 (3, 3);
+
+-- 新增四个二进制 / 协议分析实验的课程种子（id 13-16）
+-- image_url 与前端 SecLab-FrontEnd-2/public 下的静态资源路径保持一致
+INSERT IGNORE INTO `course`
+  (`id`, `cost_time`, `course_description`, `difficulty`, `image_url`, `instructor`, `course_name`, `schedule`, `course_status`, `tags`, `type`)
+VALUES
+  (13, 8, '本课程从栈结构原理出发，系统讲解栈溢出漏洞的成因与利用方法。通过在 Linux 操作环境中编写含后门的漏洞程序、使用 pwndbg 定位溢出偏移、用 pwntools 编写 exp 劫持函数返回地址，完成从理论到 getshell 的完整栈溢出学习闭环，掌握二进制安全基础与 PWN 核心技能。', 3, 'cover-stack-overflow.png', 'SecLab 教研组', '栈溢出攻击实战', '每周一', 1, '["栈溢出","二进制安全","PWN"]', 'system'),
+  (14, 8, '本课程围绕网络协议分析展开，使用 Wireshark 对 HTTP、TCP、UDP 等常见协议进行深度抓包与解析。通过分析三次握手、HTTP 请求响应、明文传输风险与 HTTPS/TLS 加密防护，帮助学习者掌握网络流量分析方法，理解协议级安全风险与防护手段。', 3, '13.png', 'SecLab 教研组', '协议分析实战', '每周二', 1, '["协议分析","Wireshark","网络安全"]', 'network'),
+  (15, 10, '本课程深入讲解 glibc 堆管理机制与堆溢出利用技术。涵盖 chunk 结构、fastbin/smallbin 组织、unlink 利用、fastbin attack 等核心攻击手法，通过实战 exp 编写完成堆溢出利用与控制流劫持，提升二进制漏洞利用进阶能力。', 4, 'cover-heap-overflow.png', 'SecLab 教研组', '堆溢出攻击实战', '每周三', 1, '["堆溢出","二进制安全","PWN"]', 'system'),
+  (16, 10, '本课程系统讲解格式化字符串漏洞原理与利用。从 printf 函数机制出发，覆盖栈上任意地址泄露、利用 %n 完成任意地址写入、结合 GOT 表劫持与控制流转移等进阶技术，帮助学习者掌握这一经典且威力巨大的漏洞利用手法。', 4, 'cover-format-string.png', 'SecLab 教研组', '格式化字符串漏洞实战', '每周四', 1, '["格式化字符串","二进制安全","PWN"]', 'system');
+
+-- 新增四个实验对应的 module 种子（module_id 15-18，与前端 data/*.js 中的实验 id 严格对齐）
+-- task_points 在前端 data/index.js 维护，这里保留 [] 占位以保证后端表结构完整
+INSERT IGNORE INTO `module`
+  (`module_id`, `difficulty`, `image_id`, `introduction`, `module_name`, `task_points`, `type`)
+VALUES
+  (15, 3, NULL, '编写漏洞程序、定位溢出偏移、用 pwntools 编写 exp 劫持返回地址。', '栈溢出实验', '[]', '["系统安全","栈溢出"]'),
+  (16, 3, NULL, '使用 Wireshark 抓包分析 HTTP/TCP 协议，理解明文传输与加密防护。', '协议分析实验', '[]', '["网络安全","协议分析"]'),
+  (17, 5, NULL, '理解 glibc 堆管理，利用 unlink 与 fastbin attack 完成堆溢出利用。', '堆溢出实验', '[]', '["系统安全","堆溢出"]'),
+  (18, 4, NULL, '利用 printf 格式化字符串漏洞完成栈泄露与任意地址写入。', '格式化字符串实验', '[]', '["系统安全","格式化字符串"]');
+
+-- 新增 module_course 关联：module_id -> course_id
+INSERT IGNORE INTO `module_course` (`module_id`, `course_id`) VALUES
+(15, 13),
+(16, 14),
+(17, 15),
+(18, 16);

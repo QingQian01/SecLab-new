@@ -442,9 +442,9 @@ onBeforeUnmount(() => chart?.destroy())
   overflow: hidden;
   border: 1px solid #e2e8f0;
   border-radius: 18px;
-  background: #fff;
+  background: var(--color-base-100);
   box-shadow: 0 12px 34px rgba(15, 23, 42, 0.06);
-  color: #0f172a;
+  color: var(--color-base-content);
 }
 
 .growth-header {
@@ -453,7 +453,7 @@ onBeforeUnmount(() => chart?.destroy())
   justify-content: space-between;
   gap: 24px;
   padding: 28px 30px 22px;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .growth-header h2 {
@@ -498,7 +498,7 @@ onBeforeUnmount(() => chart?.destroy())
   align-items: center;
   gap: 32px;
   padding: 26px 30px;
-  background: #f8fafc;
+  background: var(--color-base-200);
 }
 
 .overall-title {
@@ -582,7 +582,7 @@ onBeforeUnmount(() => chart?.destroy())
   height: 8px;
   border: 2px solid #94a3b8;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-base-100);
   content: "";
   transform: translateY(-50%);
 }
@@ -597,8 +597,8 @@ onBeforeUnmount(() => chart?.destroy())
 .dimension-tabs {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  border-top: 1px solid #eef2f7;
-  border-bottom: 1px solid #eef2f7;
+  border-top: 1px solid var(--color-base-300);
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .dimension-tabs button {
@@ -607,9 +607,9 @@ onBeforeUnmount(() => chart?.destroy())
   min-width: 0;
   padding: 17px 14px 15px;
   border: 0;
-  border-right: 1px solid #eef2f7;
+  border-right: 1px solid var(--color-base-300);
   border-bottom: 3px solid transparent;
-  background: #fff;
+  background: var(--color-base-100);
   color: #64748b;
   font-family: inherit;
   text-align: left;
@@ -618,11 +618,11 @@ onBeforeUnmount(() => chart?.destroy())
 }
 
 .dimension-tabs button:last-child { border-right: 0; }
-.dimension-tabs button:hover { background: #f8fafc; }
+.dimension-tabs button:hover { background: var(--color-base-200); }
 .dimension-tabs button.active {
   border-bottom-color: #2563eb;
-  color: #0f172a;
-  background: #f8fbff;
+  color: var(--color-base-content);
+  background: var(--color-base-200);
 }
 
 .dimension-tabs span {
@@ -679,7 +679,7 @@ onBeforeUnmount(() => chart?.destroy())
   align-items: center;
   gap: 24px;
   padding: 22px 0;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .metric-name h4,
@@ -724,7 +724,7 @@ onBeforeUnmount(() => chart?.destroy())
   padding: 24px;
   border: 1px dashed #cbd5e1;
   border-radius: 12px;
-  background: #f8fafc;
+  background: var(--color-base-200);
   color: #64748b;
   font-size: 14px;
 }
@@ -802,7 +802,7 @@ onBeforeUnmount(() => chart?.destroy())
   padding: 16px 18px;
   border: 1px solid #dbeafe;
   border-radius: 12px;
-  background: #f8fbff;
+  background: var(--color-base-200);
 }
 
 .evidence-detail dl {
@@ -819,7 +819,7 @@ onBeforeUnmount(() => chart?.destroy())
 
 .evidence-detail dd {
   margin: 0;
-  color: #1e293b;
+  color: var(--color-base-content);
 }
 
 .trace-value {
@@ -859,7 +859,7 @@ onBeforeUnmount(() => chart?.destroy())
   gap: 8px 20px;
   padding: 14px 30px;
   border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
+  background: var(--color-base-200);
   color: #64748b;
   font-size: 12px;
 }

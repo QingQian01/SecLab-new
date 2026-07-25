@@ -24,6 +24,12 @@ export const XSSExperiment: ExperimentType;
 export const CSRFExperiment: ExperimentType;
 export const CommandInjectionExperiment: ExperimentType;
 export const FileUploadExperiment: ExperimentType;
+export const MiddlewareVulnerabilityExperiment: ExperimentType;
+export const ComponentVulnerabilityExperiment: ExperimentType;
+export const StackOverflowExperiment: ExperimentType;
+export const ProtocolAnalysisExperiment: ExperimentType;
+export const HeapOverflowExperiment: ExperimentType;
+export const FormatStringExperiment: ExperimentType;
 
 export const AllExperiments: ExperimentType[];
 
@@ -35,6 +41,18 @@ export const ExperimentTypes: {
   CSRF: 3;
   COMMAND_INJECTION: 4;
   FILE_UPLOAD: 5;
+  MIDDLEWARE_VULNERABILITY: 6;
+  COMPONENT_VULNERABILITY: 7;
+  BUSINESS_LOGIC_VULNERABILITY: 8;
+  INTRANET_PENETRATION: 9;
+  CODE_AUDIT: 10;
+  CTF_PRACTICE: 11;
+  RED_TEAM_ARSENAL: 12;
+  VULNERABILITY_METHODOLOGY: 13;
+  STACK_OVERFLOW: 15;
+  PROTOCOL_ANALYSIS: 16;
+  HEAP_OVERFLOW: 17;
+  FORMAT_STRING: 18;
 };
 
 export function getExperimentsByDifficulty(difficulty: number): ExperimentType[];

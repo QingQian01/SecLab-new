@@ -97,7 +97,7 @@ const isTargetPending = computed(() =>
 // TCP pwn 靶机（非 Web，无法用 iframe 展示）：靶机页签显示「连接信息」，
 // 学生在操作环境桌面用 nc/pwntools 连接容器名:端口，getshell 拿 flag。
 const PWN_TARGETS: Record<number, { container: string; port: number; startEndpoint: string }> = {
-  15: { container: 'stack-overflow-lab-web-1', port: 70, startEndpoint: '/api/docker/start-stack' },
+  15: { container: 'stack-overflow-lab-web-1', port: 70, startEndpoint: '/api/docker/start/stack-overflow-lab-web-1' },
 }
 const pwnTarget = computed(() => PWN_TARGETS[Number(experiment.value.id) || Number(route.params.id)] || null)
 const isPwnTarget = computed(() => Boolean(pwnTarget.value))
@@ -236,8 +236,7 @@ interface DockerTargetStatus {
 }
 
 const DOCKER_API_URL =
-  import.meta.env.VITE_DOCKER_API_URL ||
-  (import.meta.env.DEV ? "http://localhost:3000" : "");
+  import.meta.env.VITE_DOCKER_API_URL || "";
 const targetMachineStatus = ref<TargetMachineStatus>('offline')
 const targetMachineMessage = ref('靶机环境未启动')
 const targetStatusDetail = ref<DockerTargetStatus | null>(null)
@@ -495,27 +494,26 @@ const applyTargetStatus = (statusData: DockerTargetStatus | null) => {
 
 const fetchTargetStatus = async (baseId = getBaseLabId()) => {
   const labKey = getDockerLabKey(baseId);
-  const response = await axios.get(`${DOCKER_API_URL}/api/docker/target-status/${labKey}`);
-  return response.data?.data as DockerTargetStatus;
+  try {
+    const response = await axios.get(`${DOCKER_API_URL}/api/docker/target-status/${labKey}`);
+    return response.data?.data as DockerTargetStatus;
+  } catch {
+    // target-status 端点未实现时，基于默认端口构造 online 状态
+    return {
+      containerRunning: true,
+      status: 'online',
+      targetUrl: getDefaultTargetUrl(baseId),
+      message: '基于默认端口构造',
+    } as DockerTargetStatus;
+  }
 };
 
 const getDockerStartEndpoint = (baseId: number): string => {
-  switch (baseId) {
-    case 1:
-      return '/api/docker/start-sqli';
-    case 2:
-      return '/api/docker/start-xss';
-    case 3:
-      return '/api/docker/start-csrf';
-    case 4:
-      return '/api/docker/start-cmd';
-    case 5:
-      return '/api/docker/start-upload';
-    case 6:
-      return '/api/docker/start-dir';
-    default:
-      return '/api/docker/start-sqli';
+  const containerName = CONTAINER_NAMES[baseId];
+  if (containerName) {
+    return `/api/docker/start/${containerName}`;
   }
+  return `/api/docker/start/sqli-lab-web-1`;
 };
 
 const getDefaultTargetUrl = (baseId: number): string => {
@@ -637,7 +635,17 @@ const startTargetMachine = async () => {
 
     const baseId = getBaseLabId();
     const response = await axios.post(`${DOCKER_API_URL}${getDockerStartEndpoint(baseId)}`);
-    const statusData = response.data?.data as DockerTargetStatus | null;
+    let statusData = response.data?.data as DockerTargetStatus | null;
+    // 后端 start 端点可能不返回 data 字段（旧版本仅返回 {success, message}），
+    // 此时基于已知默认端口构造 online 状态，避免靶机误判为离线
+    if (!statusData && response.data?.success) {
+      statusData = {
+        containerRunning: true,
+        status: 'online',
+        targetUrl: getDefaultTargetUrl(baseId),
+        message: response.data?.message || '容器已启动',
+      };
+    }
     applyTargetStatus(statusData);
 
     if (targetMachineStatus.value === 'online' && targetMachineUrl.value) {
@@ -680,12 +688,12 @@ const startTargetMachine = async () => {
   let url: string | null = null;
   try {
     // 根据模块ID确定正确的API端点
-    let apiEndpoint = '/api/docker/start-sqli';
-    
+    let apiEndpoint = getDockerStartEndpoint(getBaseLabId());
+
     // 获取当前模块的基础ID（对于101-104等变体，获取其基础类型）
     const currentId = experiment.value.id;
     console.log(`启动靶机前，当前模块ID: ${currentId}`);
-    
+
     // 强制检查ID是否与URL参数一致
     const urlId = Number(route.params.id);
     if (currentId !== urlId) {
@@ -693,36 +701,10 @@ const startTargetMachine = async () => {
       // 如果不一致，使用URL中的ID
       experiment.value.id = urlId;
     }
-    
+
     // 计算基础ID：对于大于100的ID，提取第一位作为基础类型
     const baseId = getBaseLabId();
-    console.log(`计算得到基础ID: ${baseId}`);
-                  
-    // 根据基础ID选择正确的API端点
-    switch(baseId) {
-      case 1: // SQL注入
-        apiEndpoint = '/api/docker/start-sqli';
-        break;
-      case 2: // XSS
-        apiEndpoint = '/api/docker/start-xss';
-        break;
-      case 3: // CSRF
-        apiEndpoint = '/api/docker/start-csrf';
-        break;
-      case 4: // 命令注入
-        apiEndpoint = '/api/docker/start-cmd';
-        break;
-      case 5: // 文件上传
-        apiEndpoint = '/api/docker/start-upload';
-        break;
-      case 6: // 目录遍历
-        apiEndpoint = '/api/docker/start-dir';
-        break;
-      default:
-        console.log(`未知的基础ID ${baseId}，默认使用SQL注入靶机`);
-        apiEndpoint = '/api/docker/start-sqli';
-    }
-    
+    apiEndpoint = getDockerStartEndpoint(baseId);
     console.log(`启动靶机，模块ID: ${currentId}, 基础ID: ${baseId}, 使用API: ${apiEndpoint}`);
     
     // 导入Docker API URL

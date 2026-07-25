@@ -2,7 +2,7 @@
 // 定义课程接口
 
 import {useRoute, useRouter} from "vue-router";
-import { ref, onMounted, type Ref } from 'vue'
+import { ref, onMounted, computed, type Ref } from 'vue'
 import { CourseStatus } from "./index";
 import type { Course } from "./index";
 import {getCourseDetail} from "../../../api.ts";
@@ -225,6 +225,94 @@ onMounted( async ()=>{
             moduleName: '防火墙配置',
             introduction: '学习防火墙的配置和管理',
             type: ['网络安全', '防火墙'],
+            difficulty: 4
+          }
+        ]
+      },
+      {
+        id: 13,
+        name: '栈溢出攻击实战',
+        description: '本课程从栈结构原理出发，系统讲解栈溢出漏洞的成因与利用方法。通过在 Linux 操作环境中编写含后门的漏洞程序、使用 pwndbg 定位溢出偏移、用 pwntools 编写 exp 劫持函数返回地址，完成从理论到 getshell 的完整栈溢出学习闭环，掌握二进制安全基础与 PWN 核心技能。',
+        difficulty: 3,
+        type: 'system',
+        tags: ['栈溢出', '二进制安全', 'PWN'],
+        imageUrl: '/13.png',
+        costTime: 8,
+        schedule: '每周一 14:00-16:00',
+        status: 'active',
+        instructor: 'SecLab 教研组',
+        modules: [
+          {
+            moduleId: 15,
+            moduleName: '栈溢出实验',
+            introduction: '编写漏洞程序、定位溢出偏移、用 pwntools 编写 exp 劫持返回地址',
+            type: ['系统安全', '栈溢出'],
+            difficulty: 3
+          }
+        ]
+      },
+      {
+        id: 14,
+        name: '协议分析实战',
+        description: '本课程围绕网络协议分析展开，使用 Wireshark 对 HTTP、TCP、UDP 等常见协议进行深度抓包与解析。通过分析三次握手、HTTP 请求响应、明文传输风险与 HTTPS/TLS 加密防护，帮助学习者掌握网络流量分析方法，理解协议级安全风险与防护手段。',
+        difficulty: 3,
+        type: 'network',
+        tags: ['协议分析', 'Wireshark', '网络安全'],
+        imageUrl: '/14.png',
+        costTime: 8,
+        schedule: '每周二 14:00-16:00',
+        status: 'active',
+        instructor: 'SecLab 教研组',
+        modules: [
+          {
+            moduleId: 16,
+            moduleName: '协议分析实验',
+            introduction: '使用 Wireshark 抓包分析 HTTP/TCP 协议，理解明文传输与加密防护',
+            type: ['网络安全', '协议分析'],
+            difficulty: 3
+          }
+        ]
+      },
+      {
+        id: 15,
+        name: '堆溢出攻击实战',
+        description: '本课程深入讲解 glibc 堆管理机制与堆溢出利用技术。涵盖 chunk 结构、fastbin/smallbin 组织、unlink 利用、fastbin attack 等核心攻击手法，通过实战 exp 编写完成堆溢出利用与控制流劫持，提升二进制漏洞利用进阶能力。',
+        difficulty: 4,
+        type: 'system',
+        tags: ['堆溢出', '二进制安全', 'PWN'],
+        imageUrl: '/15.png',
+        costTime: 10,
+        schedule: '每周三 14:00-16:00',
+        status: 'active',
+        instructor: 'SecLab 教研组',
+        modules: [
+          {
+            moduleId: 17,
+            moduleName: '堆溢出实验',
+            introduction: '理解 glibc 堆管理，利用 unlink 与 fastbin attack 完成堆溢出利用',
+            type: ['系统安全', '堆溢出'],
+            difficulty: 5
+          }
+        ]
+      },
+      {
+        id: 16,
+        name: '格式化字符串漏洞实战',
+        description: '本课程系统讲解格式化字符串漏洞原理与利用。从 printf 函数机制出发，覆盖栈上任意地址泄露、利用 %n 完成任意地址写入、结合 GOT 表劫持与控制流转移等进阶技术，帮助学习者掌握这一经典且威力巨大的漏洞利用手法。',
+        difficulty: 4,
+        type: 'system',
+        tags: ['格式化字符串', '二进制安全', 'PWN'],
+        imageUrl: '/16.png',
+        costTime: 10,
+        schedule: '每周四 14:00-16:00',
+        status: 'active',
+        instructor: 'SecLab 教研组',
+        modules: [
+          {
+            moduleId: 18,
+            moduleName: '格式化字符串实验',
+            introduction: '利用 printf 格式化字符串漏洞完成栈泄露与任意地址写入',
+            type: ['系统安全', '格式化字符串'],
             difficulty: 4
           }
         ]
@@ -492,8 +580,44 @@ const allCourses = ref([
   { id: 9, name: '数字签名技术' },
   { id: 10, name: '操作系统安全概述' },
   { id: 11, name: '可信计算技术' },
-  { id: 12, name: '网络安全概述' }
+  { id: 12, name: '网络安全概述' },
+  { id: 13, name: '栈溢出攻击实战' },
+  { id: 14, name: '协议分析实战' },
+  { id: 15, name: '堆溢出攻击实战' },
+  { id: 16, name: '格式化字符串漏洞实战' }
 ]);
+
+// ── 教学视频（阿里云 OSS 公共读）──────────────────────────
+// OSS bucket: seclab2026，地域: cn-hangzhou，权限: public-read
+// 前端直接拼接 URL 播放，无需后端签名。文件名含中文/空格需 encodeURIComponent。
+const OSS_BASE_URL =
+  import.meta.env.VITE_OSS_BASE_URL ||
+  'https://seclab2026.oss-cn-hangzhou.aliyuncs.com';
+
+// 课程 ID -> OSS 视频文件名映射（文件名与 bucket 内实际对象 key 一致）
+// 注：课程 2 的视频未在 OSS 中找到（已尝试多种文件名变体均 404），暂留空，
+//     页面会显示「该课程暂无视频」。上传后在此补充文件名即可。
+const COURSE_VIDEOS: Record<number, string> = {
+  1: '1.1Sql注入攻击.mp4',
+  2: '1.2Xss与csrf-.mp4',
+  3: '1.3 IDS和IPS.mp4',
+  4: '1.4Apt攻击.mp4',
+  5: '1.5防火墙.mp4',
+  6: '2.2 古典密码.mp4',
+  7: '2.4公钥密码简介.mp4',
+  8: '2.5 Rsa公钥加密方案.mp4',
+  9: '2.6数字签名.mp4',
+  10: '3.2 操作系统安全概述.mp4',
+  11: '3.4 可信计算.mp4',
+  12: '4.1.1 网络安全概述.mp4',
+};
+
+// 当前课程的视频 URL，无映射则返回空串（模板显示「暂无视频」占位）
+const videoUrl = computed(() => {
+  const filename = COURSE_VIDEOS[course.value.id as number];
+  if (!filename) return '';
+  return `${OSS_BASE_URL}/${encodeURIComponent(filename)}`;
+});
 </script>
 
 <template>
@@ -652,100 +776,13 @@ const allCourses = ref([
                 <div class="bg-base-200 rounded-xl overflow-hidden shadow-lg">
                   <!-- 视频播放器区域 -->
                   <div class="aspect-video w-full">
-                    <video 
-                      v-if="course.id === 1"
-                      class="w-full" 
+                    <video
+                      v-if="videoUrl"
+                      class="w-full"
                       controls
+                      :key="videoUrl"
                     >
-                      <source :src="'/video/1.1Sql注入攻击.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 2"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/1.2Xss与csrf-.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 3"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/1.3 IDS和IPS.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 4"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/1.4Apt攻击.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 5"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/1.5防火墙.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 6"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/2.2 古典密码.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 7"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/2.4公钥密码简介.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 8"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/2.5 Rsa公钥加密方案.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 9"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/2.6数字签名.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 10"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/3.2 操作系统安全概述.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 11"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/3.4 可信计算.mp4'" type="video/mp4" />
-                      您的浏览器不支持 HTML5 视频播放。
-                    </video>
-                    <video 
-                      v-else-if="course.id === 12"
-                      class="w-full" 
-                      controls
-                    >
-                      <source :src="'/video/4.1.1 网络安全概述.mp4'" type="video/mp4" />
+                      <source :src="videoUrl" type="video/mp4" />
                       您的浏览器不支持 HTML5 视频播放。
                     </video>
                     <div v-else class="w-full h-full flex items-center justify-center bg-base-300">

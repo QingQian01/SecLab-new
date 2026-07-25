@@ -1,0 +1,6 @@
+# 确保 shell 脚本和 Linux 配置文件在 Windows 检出时保持 LF 行尾，
+# 避免 CRLF 导致容器内 exec 失败（exec /start.sh: no such file or directory）
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

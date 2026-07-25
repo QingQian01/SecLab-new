@@ -6,6 +6,10 @@ import { CommandInjectionExperiment } from './CommandInjectionExperiment';
 import { FileUploadExperiment } from './FileUploadExperiment';
 import { MiddlewareVulnerabilityExperiment } from './MiddlewareVulnerabilityExperiment';
 import { ComponentVulnerabilityExperiment } from './ComponentVulnerabilityExperiment';
+import { StackOverflowExperiment } from './StackOverflowExperiment';
+import { ProtocolAnalysisExperiment } from './ProtocolAnalysisExperiment';
+import { HeapOverflowExperiment } from './HeapOverflowExperiment';
+import { FormatStringExperiment } from './FormatStringExperiment';
 
 // 创建基础实验数据，确保ID从1开始连续
 const SQLInjection = JSON.parse(JSON.stringify(SQLInjectionExperiment));
@@ -36,6 +40,14 @@ MiddlewareVulnerability.introduction = '学习目录遍历漏洞的原理和利�
 const ComponentVulnerability = JSON.parse(JSON.stringify(ComponentVulnerabilityExperiment));
 ComponentVulnerability.id = 7;
 ComponentVulnerability.name = '组件漏洞挖掘';
+
+// 接入四个新增实验（栈溢出 / 协议分析 / 堆溢出 / 格式化字符串）
+// 它们的数据文件已经把 id 固定为 15/16/17/18，与 catalogPresentation.ts 中的模块 id 严格对齐，
+// 这里仅做一次深拷贝，避免在调用方意外修改原始模块数据。
+const StackOverflow = JSON.parse(JSON.stringify(StackOverflowExperiment));
+const ProtocolAnalysis = JSON.parse(JSON.stringify(ProtocolAnalysisExperiment));
+const HeapOverflow = JSON.parse(JSON.stringify(HeapOverflowExperiment));
+const FormatString = JSON.parse(JSON.stringify(FormatStringExperiment));
 
 // 创建自定义实验内容，填充ID 8-12
 const BusinessLogicVulnerability = {
@@ -446,7 +458,12 @@ export const AllExperiments = [
   CodeAudit,              // ID: 10 - 代码审计进阶
   CTFPractice,           // ID: 11 - CTF综合实战
   RedTeamArsenal,        // ID: 12 - 红队武器库
-  VulnerabilityMethodology // ID: 13 - 漏洞挖掘方法论
+  VulnerabilityMethodology, // ID: 13 - 漏洞挖掘方法论
+  // 以下四个为本次新增的二进制 / 协议分析实验，id 与 catalogPresentation.ts 模块 id 对齐
+  StackOverflow,         // ID: 15 - 栈溢出实验
+  ProtocolAnalysis,      // ID: 16 - 协议分析实验
+  HeapOverflow,          // ID: 17 - 堆溢出实验
+  FormatString           // ID: 18 - 格式化字符串实验
 ];
 
 // 按ID查找实验的辅助函数
@@ -477,7 +494,12 @@ export const ExperimentTypes = {
   CODE_AUDIT: 10,
   CTF_PRACTICE: 11,
   RED_TEAM_ARSENAL: 12,
-  VULNERABILITY_METHODOLOGY: 13
+  VULNERABILITY_METHODOLOGY: 13,
+  // 新增四个实验类型，id 与 catalogPresentation.ts 模块 id 对齐
+  STACK_OVERFLOW: 15,
+  PROTOCOL_ANALYSIS: 16,
+  HEAP_OVERFLOW: 17,
+  FORMAT_STRING: 18
 };
 
 // 按难度获取实验

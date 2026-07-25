@@ -16,7 +16,7 @@ const shouldShowChatButton = computed(() => {
 </script>
 
 <template>
-  <div class="fixed w-full h-full bg-white">
+  <div class="fixed w-full h-full bg-base-100">
     <RouterView>
     </RouterView>
     <Toast />

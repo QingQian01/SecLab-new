@@ -1,8 +1,10 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
+import { useTheme } from '../../composables/useTheme';
 
 const route = useRoute();
+const { currentTheme, toggleTheme } = useTheme();
 const isLoaded = ref(false);
 
 // 导航项配置
@@ -117,6 +119,12 @@ const isActive = (path: string) => {
             </ul>
           </li>
         </ul>
+        <button @click="toggleTheme"
+                class="btn btn-ghost btn-circle ml-2"
+                :aria-label="currentTheme === 'night' ? '切换到亮色模式' : '切换到暗色模式'"
+                :title="currentTheme === 'night' ? '切换到亮色模式' : '切换到暗色模式'">
+          <i :class="['fas', currentTheme === 'night' ? 'fa-sun' : 'fa-moon', 'text-lg']"></i>
+        </button>
       </div>
     </div>
 

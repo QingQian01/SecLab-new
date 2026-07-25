@@ -43,7 +43,7 @@ CORS_ORIGINS = list(dict.fromkeys(configured_cors_origins + DEFAULT_CORS_ORIGINS
 # 注意：不要使用 cmd 这种简写，cmd 既不是 command-inject 的前缀也不是子串，会导致白名单误拒
 ALLOWED_CONTAINER_PREFIXES = os.getenv(
     "ALLOWED_CONTAINER_PREFIXES",
-    "sqli,xss,csrf,upload,dir,command-inject,sec-code",
+    "sqli,xss,csrf,upload,dir,command-inject,sec-code,stack-overflow,protocol-analysis,heap-overflow,format-string",
 ).split(",")
 
 # Maximum log lines returned by Docker tools
@@ -56,3 +56,26 @@ MYSQL_USER = os.getenv("MYSQL_USER", "seclab_app")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "Seclab@123")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "seclab_profile")
 MYSQL_CHARSET = os.getenv("MYSQL_CHARSET", "utf8mb4")
+
+# ── 操作环境（per-student noVNC 桌面）配置 ──────────────────
+# 与 operation_env.py / operation_session_repository.py 配合使用：
+# ai-agent-service 动态启动 operation 容器（5901 映射到随机宿主端口），
+# 并通过 /api/docker/vnc/{session_id} WebSocket 把浏览器与容器 VNC 桥接起来。
+OPERATION_IMAGE = os.getenv("OPERATION_IMAGE", "seclab-op-web-tools:1.0")
+OPERATION_VNC_PASSWORD = os.getenv("OPERATION_VNC_PASSWORD", "123456")
+OPERATION_VNC_HOST = os.getenv("OPERATION_VNC_HOST", "127.0.0.1")
+OPERATION_SESSION_TIMEOUT_SECONDS = int(os.getenv("OPERATION_SESSION_TIMEOUT_SECONDS", str(2 * 60 * 60)))
+OPERATION_CLEANUP_INTERVAL_SECONDS = int(os.getenv("OPERATION_CLEANUP_INTERVAL_SECONDS", str(10 * 60)))
+
+# 静态映射：模块 baseId -> 需要加入操作桌面会话网络的靶机容器名。
+# baseId 由前端 getBaseLabId() 推导（module_id >= 100 取首位数字，否则原值），
+# 与 SecLab-FrontEnd-2/src/pages/User/Module/index.vue:getBaseLabId() 保持一致。
+OPERATION_TARGET_CONTAINERS = {
+    1: ["sqli-lab-web-1"],
+    2: ["xss-lab-web-1"],
+    3: ["csrf-lab-web-1"],
+    4: ["command-inject-web-1"],
+    5: ["file-upload-lab-web-1"],
+    6: ["directory-traversal-lab-web-1"],
+    15: ["stack-overflow-lab-web-1"],  # 栈溢出 pwn 靶机（TCP:70）
+}

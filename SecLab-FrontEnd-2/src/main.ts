@@ -50,7 +50,8 @@ hljs.registerLanguage("css", css);
 hljs.registerLanguage("dockerfile", dockerfile);
 import "magic.css/dist/magic.min.css"
 import "animate.css"
-document.documentElement.setAttribute('data-theme', 'light')
+import { initThemeFromStorage } from './composables/useTheme'
+initThemeFromStorage()
 createApp(App)
     .use(hljsVuePlugin)
     .use(VueCookies,{expires:"7d"})

@@ -164,6 +164,46 @@ export const PRESENTATION_COURSE_SEEDS: PresentationCourseSeed[] = [
     videoUrl: '/video/4.1.1_网络安全概述.mp4',
     tags: ['网络安全', '安全架构', '防护体系'],
   },
+  {
+    id: 13,
+    name: '栈溢出攻击实战',
+    description: '从栈结构原理到 pwndbg 调试、pwntools 编写 exp，完整栈溢出利用闭环。',
+    difficulty: 3,
+    type: 'system',
+    category: '系统安全',
+    cover: '/13.png',
+    tags: ['栈溢出', '二进制安全', 'PWN'],
+  },
+  {
+    id: 14,
+    name: '协议分析实战',
+    description: '使用 Wireshark 深度分析 HTTP/TCP/UDP 协议，理解明文嗅探与 HTTPS 防护。',
+    difficulty: 3,
+    type: 'network',
+    category: '网络安全',
+    cover: '/14.png',
+    tags: ['协议分析', 'Wireshark', '网络安全'],
+  },
+  {
+    id: 15,
+    name: '堆溢出攻击实战',
+    description: '掌握 glibc 堆管理与 unlink、fastbin attack 等堆溢出利用核心技术。',
+    difficulty: 4,
+    type: 'system',
+    category: '系统安全',
+    cover: '/15.png',
+    tags: ['堆溢出', '二进制安全', 'PWN'],
+  },
+  {
+    id: 16,
+    name: '格式化字符串漏洞实战',
+    description: '从 printf 漏洞原理到任意地址读写，掌握格式化字符串利用全流程。',
+    difficulty: 4,
+    type: 'system',
+    category: '系统安全',
+    cover: '/16.png',
+    tags: ['格式化字符串', '二进制安全', 'PWN'],
+  },
 ]
 
 export const PRESENTATION_MODULE_SEEDS: PresentationModuleSeed[] = [
@@ -181,6 +221,10 @@ export const PRESENTATION_MODULE_SEEDS: PresentationModuleSeed[] = [
   { id: 12, name: '红队武器库', description: '学习红队武器使用、免杀、钓鱼与渗透技巧。', difficulty: 5, type: '网络攻防', estimatedTime: '4-5小时', score: 100, courseId: 3, courseName: 'IDS和IPS系统' },
   { id: 13, name: '漏洞挖掘方法论', description: '掌握漏洞发现、验证、利用和复现的方法论。', difficulty: 5, type: '系统安全', estimatedTime: '5小时', score: 100, courseId: 10, courseName: '操作系统安全概述' },
   { id: 14, name: '第三方框架漏洞', description: '聚焦 ThinkPHP、Struts2、Spring 等框架漏洞实战。', difficulty: 5, type: '系统安全', estimatedTime: '5小时', score: 100, courseId: 11, courseName: '可信计算技术' },
+  { id: 15, name: '栈溢出实验', description: '编写漏洞程序、定位溢出偏移、用 pwntools 编写 exp 劫持返回地址。', difficulty: 3, type: '系统安全', estimatedTime: '3-4小时', score: 75, courseId: 13, courseName: '栈溢出攻击实战' },
+  { id: 16, name: '协议分析实验', description: '使用 Wireshark 抓包分析 HTTP/TCP 协议，理解明文传输与加密防护。', difficulty: 3, type: '网络安全', estimatedTime: '3小时', score: 70, courseId: 14, courseName: '协议分析实战' },
+  { id: 17, name: '堆溢出实验', description: '理解 glibc 堆管理，利用 unlink 与 fastbin attack 完成堆溢出利用。', difficulty: 5, type: '系统安全', estimatedTime: '4-5小时', score: 90, courseId: 15, courseName: '堆溢出攻击实战' },
+  { id: 18, name: '格式化字符串实验', description: '利用 printf 格式化字符串漏洞完成栈泄露与任意地址写入。', difficulty: 4, type: '系统安全', estimatedTime: '4小时', score: 85, courseId: 16, courseName: '格式化字符串漏洞实战' },
 ]
 
 const buildPresentationAdminCourse = (course: PresentationCourseSeed, index: number): Course => ({
