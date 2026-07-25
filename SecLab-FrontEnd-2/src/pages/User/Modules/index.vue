@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { ModuleOverViewType } from './components/ModuleOverView.ts'
 import ModuleOverView from './components/ModuleOverView.vue'
+
+const router = useRouter()
 
 // 修改模块数据，添加分数计算
 const calculateScore = (difficulty: number, time: string): number => {
@@ -171,6 +174,11 @@ onMounted(()=>{
   //   modules.value = res.data;
   // })
 })
+
+// 开始实验：跳转到对应模块路径
+const handleStartExperiment = (moduleId: number) => {
+  router.push(`/user/module/${moduleId}`)
+}
 
 // 筛选条件
 const filters = ref({
@@ -346,10 +354,11 @@ const stats = computed(() => ({
     <!-- 实验列表 -->
     <div v-if="filteredModules.length" 
          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
-      <ModuleOverView 
-        v-for="module in filteredModules" 
-        :key="module.id" 
+      <ModuleOverView
+        v-for="module in filteredModules"
+        :key="module.id"
         :module="module"
+        @start-experiment="handleStartExperiment"
       />
     </div>
     

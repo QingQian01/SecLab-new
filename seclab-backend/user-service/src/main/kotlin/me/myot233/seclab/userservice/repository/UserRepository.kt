@@ -15,6 +15,7 @@ interface UserRepository : JpaRepository<UserEntity, Long> {
     fun existsByUserStudentNumberAndUserIdNot(userStudentNumber: String, userId: Long): Boolean
 
     fun findByUserStudentNumber(userStudentNumber: String): UserEntity?
+    fun findAllByUserStudentNumberIn(userStudentNumbers: Collection<String>): List<UserEntity>
 
     @EntityGraph(attributePaths = ["classInfo"])
     @Query(

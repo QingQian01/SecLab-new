@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS `user` (
   `user_id` BIGINT NOT NULL AUTO_INCREMENT,
   `create_time` DATETIME(6) NULL DEFAULT CURRENT_TIMESTAMP(6),
   `is_admin` BIT(1) NULL DEFAULT b'0',
+  `user_role` VARCHAR(16) NOT NULL DEFAULT 'STUDENT',
   `is_deleted` INT NULL DEFAULT 0,
   `user_academy` VARCHAR(255) NULL,
   `user_email` VARCHAR(255) NULL,
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS `user` (
   UNIQUE KEY `uk_user_student_number` (`user_student_number`),
   KEY `idx_user_class_id` (`class_id_class_id`),
   KEY `idx_user_admin_deleted` (`is_admin`, `is_deleted`),
+  KEY `idx_user_role_deleted` (`user_role`, `is_deleted`),
   CONSTRAINT `fk_user_class`
     FOREIGN KEY (`class_id_class_id`) REFERENCES `class` (`class_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -47,13 +49,17 @@ CREATE TABLE IF NOT EXISTS `course` (
   `difficulty` INT NULL,
   `image_url` VARCHAR(255) NULL,
   `instructor` VARCHAR(255) NULL,
+  `created_by` BIGINT NULL,
   `course_name` VARCHAR(255) NOT NULL,
   `schedule` VARCHAR(255) NULL,
   `course_status` TINYINT NULL DEFAULT 1,
   `tags` LONGTEXT NULL,
   `type` VARCHAR(255) NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_course_status_type` (`course_status`, `type`)
+  KEY `idx_course_status_type` (`course_status`, `type`),
+  KEY `idx_course_creator_status` (`created_by`, `course_status`),
+  CONSTRAINT `fk_course_creator`
+    FOREIGN KEY (`created_by`) REFERENCES `user` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `module` (
@@ -99,10 +105,10 @@ INSERT IGNORE INTO `class` (`class_id`, `class_name`, `class_detail`, `is_end`) 
 
 -- password: 123456; user-service upgrades legacy MD5 to BCrypt on successful login.
 INSERT IGNORE INTO `user`
-  (`user_id`, `user_student_number`, `user_password`, `user_name`, `user_gender`, `class_id_class_id`, `is_admin`, `is_deleted`)
+  (`user_id`, `user_student_number`, `user_password`, `user_name`, `user_gender`, `class_id_class_id`, `is_admin`, `user_role`, `is_deleted`)
 VALUES
-  (1, 'admin', 'e10adc3949ba59abbe56e057f20f883e', 'Administrator', 1, 1, b'1', 0),
-  (2, '202400000001', 'e10adc3949ba59abbe56e057f20f883e', 'Demo Student', 1, 1, b'0', 0);
+  (1, 'admin', 'e10adc3949ba59abbe56e057f20f883e', 'Administrator', 1, 1, b'1', 'TEACHER', 0),
+  (2, '202400000001', 'e10adc3949ba59abbe56e057f20f883e', 'Demo Student', 1, 1, b'0', 'STUDENT', 0);
 
 INSERT IGNORE INTO `course`
   (`id`, `cost_time`, `course_description`, `difficulty`, `image_url`, `instructor`, `course_name`, `schedule`, `course_status`, `tags`, `type`)

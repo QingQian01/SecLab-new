@@ -34,8 +34,18 @@ let course:Ref<Course> = ref({
 // 用于模块依赖图的数据
 const moduleItems = ref<any[]>([]);
 
-// 添加学习进度
-const learningProgress = ref(35);
+// 添加学习进度（基于实际完成的模块数动态计算）
+const learningProgress = ref(0);
+
+// 动态计算学习进度：根据课程模块总数和实际完成数计算
+function updateLearningProgress() {
+  if (!course.value.modules || course.value.modules.length === 0) {
+    learningProgress.value = 0;
+    return;
+  }
+  // 默认初始化为0，后端接入后应从API获取实际完成数
+  learningProgress.value = 0;
+}
 
 // 添加课程资源
 const courseResources = ref([

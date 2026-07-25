@@ -90,3 +90,8 @@ backup/
 seclab-backend/experiment-module-service/.gradle-user-home/
 tmp-selenium/
 tmp-gradle-home/
+.worktrees/
+
+CLAUDE.md
+.workbuddy
+BUG_FIX_LOG.md

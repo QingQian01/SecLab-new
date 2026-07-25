@@ -10,4 +10,6 @@ export interface Course {
   experimentCount: number
   createTime: string
   updateTime?: string
-} 
+  createdBy?: number | null
+  creatorEditable?: boolean
+}

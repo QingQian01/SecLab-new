@@ -2,7 +2,7 @@
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import MarkdownRenderer from "../../../components/MarkdownRenderer.vue";
 import type { DisplayQuestionType } from '../../../types/Question';
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import type {Experiment} from "../../../types/experiment.ts";
 import type { Module } from './index.ts';
 import { convertExperimentToModule } from './index.ts';
@@ -87,6 +87,8 @@ const getBaseLabId = () => {
 }
 
 onMounted(async () => {
+  // 始终滚动到顶部，避免从其他页面（如个人画像）跳入时停留在底部
+  window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior })
   try {
     // 如果没有提供模块ID，重定向到模块列表页面
     if (!moduleId) {
@@ -175,6 +177,10 @@ onMounted(async () => {
     }, 2000);
   } finally {
     isLoading.value = false;
+    // 数据加载并渲染完成后再次滚到顶部：onMounted 首次滚动时题目尚未渲染，
+    // DOM 撑高后视口可能停留在旧偏移，这里在 DOM 刷新后强制回到顶部
+    await nextTick();
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   }
 });
 
@@ -1373,9 +1379,12 @@ const copyToClipboard = (text: string) => {
         </div>
       </div>
       
-      <!-- 返回按钮 -->
+      <!-- 返回按钮：优先使用 from 参数指定的来源页，避免 router.go(-1) 因历史栈原因跳到错误页 -->
       <div class="mb-4 animate-slide-down">
-        <button @click="router.go(-1)" class="btn btn-sm btn-ghost gap-2 hover:bg-base-200">
+        <button
+          @click="route.query.from ? router.push(String(route.query.from)) : router.go(-1)"
+          class="btn btn-sm btn-ghost gap-2 hover:bg-base-200"
+        >
           <i class="fas fa-arrow-left"></i>
           <span>返回</span>
         </button>
@@ -1599,19 +1608,19 @@ const copyToClipboard = (text: string) => {
                                 <!-- 单选题 -->
                                 <div v-else-if="question.type === 'single-choice'" class="space-y-2">
                                   <div v-for="(option, index) in question.options" :key="index" class="flex items-center gap-2">
-                                    <input type="radio" v-model="answers[task.id][question.id]" :name="'q' + question.id" :value="option" class="radio radio-primary" />
+                                    <input type="radio" v-model="answers[task.id][question.id]" :name="'q' + question.id" :value="option" class="radio radio-primary" :disabled="answerStatus[task.id][question.id] === true" />
                                     <span>{{ option }}</span>
                                   </div>
                                   <div class="flex items-center gap-2 mt-2">
-                                    <button @click="checkAnswer(task.id, question.id)" class="btn btn-primary" :disabled="questionSubmitting[task.id]?.[question.id]">{{ questionSubmitting[task.id]?.[question.id] ? '提交中...' : '检查答案' }}</button>
+                                    <button @click="checkAnswer(task.id, question.id)" class="btn btn-primary" :disabled="questionSubmitting[task.id]?.[question.id] || answerStatus[task.id][question.id] === true">{{ questionSubmitting[task.id]?.[question.id] ? '提交中...' : answerStatus[task.id][question.id] === true ? '已通过' : '检查答案' }}</button>
                                     <span v-if="answerStatus[task.id][question.id] !== null" :class="answerStatus[task.id][question.id] ? 'text-success' : 'text-error'" class="flex items-center">
                                       <i :class="answerStatus[task.id][question.id] ? 'fa-check' : 'fa-times'" class="fas mr-1"></i>
                                       {{ answerStatus[task.id][question.id] ? '答案正确' : '答案错误' }}
                                     </span>
                                   </div>
-                                  
+
                                   <!-- Flag 提交结果显示 -->
-                                  <div v-if="flagSubmitStatus.isSubmitted && flagSubmitStatus.taskId === task.id && flagSubmitStatus.questionId === question.id" 
+                                  <div v-if="flagSubmitStatus.isSubmitted && flagSubmitStatus.taskId === task.id && flagSubmitStatus.questionId === question.id"
                                       :class="flagSubmitStatus.isSuccess ? 'alert alert-success' : 'alert alert-error'"
                                       class="mt-2 animate-fade-in">
                                     <div class="flex items-center">
@@ -1624,19 +1633,19 @@ const copyToClipboard = (text: string) => {
                                 <!-- 多选题 -->
                                 <div v-else-if="question.type === 'multiple-choice'" class="space-y-2">
                                   <div v-for="(option, index) in question.options" :key="index" class="flex items-center gap-2">
-                                    <input type="checkbox" v-model="answers[task.id][question.id]" :value="option" class="checkbox checkbox-primary" />
+                                    <input type="checkbox" v-model="answers[task.id][question.id]" :value="option" class="checkbox checkbox-primary" :disabled="answerStatus[task.id][question.id] === true" />
                                     <span>{{ option }}</span>
                                   </div>
                                   <div class="flex items-center gap-2 mt-2">
-                                    <button @click="checkAnswer(task.id, question.id)" class="btn btn-primary" :disabled="questionSubmitting[task.id]?.[question.id]">{{ questionSubmitting[task.id]?.[question.id] ? '提交中...' : '检查答案' }}</button>
+                                    <button @click="checkAnswer(task.id, question.id)" class="btn btn-primary" :disabled="questionSubmitting[task.id]?.[question.id] || answerStatus[task.id][question.id] === true">{{ questionSubmitting[task.id]?.[question.id] ? '提交中...' : answerStatus[task.id][question.id] === true ? '已通过' : '检查答案' }}</button>
                                     <span v-if="answerStatus[task.id][question.id] !== null" :class="answerStatus[task.id][question.id] ? 'text-success' : 'text-error'" class="flex items-center">
                                       <i :class="answerStatus[task.id][question.id] ? 'fa-check' : 'fa-times'" class="fas mr-1"></i>
                                       {{ answerStatus[task.id][question.id] ? '答案正确' : '答案错误' }}
                                     </span>
                                   </div>
-                                  
+
                                   <!-- Flag 提交结果显示 -->
-                                  <div v-if="flagSubmitStatus.isSubmitted && flagSubmitStatus.taskId === task.id && flagSubmitStatus.questionId === question.id" 
+                                  <div v-if="flagSubmitStatus.isSubmitted && flagSubmitStatus.taskId === task.id && flagSubmitStatus.questionId === question.id"
                                       :class="flagSubmitStatus.isSuccess ? 'alert alert-success' : 'alert alert-error'"
                                       class="mt-2 animate-fade-in">
                                     <div class="flex items-center">
@@ -1808,9 +1817,10 @@ const copyToClipboard = (text: string) => {
                   </button>
                 </div>
               </div>
-              <iframe 
-                :src="targetMachineUrl" 
+              <iframe
+                :src="targetMachineUrl"
                 class="w-full h-[calc(100%-32px)] border-none target-iframe"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
                 @load="() => console.log('靶机iframe加载完成')"
                 @error="(e) => console.error('靶机iframe加载失败', e)"
               ></iframe>

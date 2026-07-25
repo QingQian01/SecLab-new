@@ -10,7 +10,7 @@ version = "0.0.1-SNAPSHOT"
 
 java {
 	toolchain {
-		languageVersion = JavaLanguageVersion.of(17)
+		languageVersion = JavaLanguageVersion.of(21)
 	}
 }
 
@@ -31,6 +31,7 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa") // JPA
 	implementation("org.springframework.boot:spring-boot-starter-validation") // 校验
 	implementation("org.springframework.security:spring-security-crypto")
+	implementation("org.apache.poi:poi-ooxml:5.3.0")
 	implementation("org.springframework.cloud:spring-cloud-starter-netflix-eureka-client")
 	implementation("com.alibaba:druid-spring-boot-starter:1.2.23")
 	implementation("com.mysql:mysql-connector-j:8.3.0")

@@ -13,6 +13,8 @@ import me.myot233.seclab.experimentmoduleservice.repository.ModuleRepository
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 
 @Service
 class CatalogQueryService(
@@ -42,7 +44,7 @@ class CatalogQueryService(
         )
 
     @Transactional
-    fun createCourse(request: CourseMutationRequest): CourseSummaryDto {
+    fun createCourse(teacherId: Long, request: CourseMutationRequest): CourseSummaryDto {
         validateCourseRequest(request)
         val saved = courseRepository.save(
             CourseEntity(
@@ -52,6 +54,7 @@ class CatalogQueryService(
                 difficulty = normalizeDifficulty(request.difficulty),
                 imageUrl = request.imageUrl?.trim()?.takeIf { it.isNotEmpty() },
                 instructor = request.teacherName?.trim()?.takeIf { it.isNotEmpty() },
+                createdBy = teacherId,
                 courseStatus = mapCourseStatusToDb(request.status),
                 tags = stringifyStringList(request.tags),
                 type = normalizeType(request.category),
@@ -61,9 +64,10 @@ class CatalogQueryService(
     }
 
     @Transactional
-    fun updateCourse(id: Int, request: CourseMutationRequest): CourseSummaryDto {
+    fun updateCourse(teacherId: Long, id: Int, request: CourseMutationRequest): CourseSummaryDto {
         validateCourseRequest(request)
         val existing = courseRepository.findById(id).orElseThrow { NoSuchElementException("课程不存在: $id") }
+        requireCourseOwner(teacherId, existing)
         val saved = courseRepository.save(
             CourseEntity(
                 id = existing.id,
@@ -72,6 +76,7 @@ class CatalogQueryService(
                 difficulty = normalizeDifficulty(request.difficulty),
                 imageUrl = request.imageUrl?.trim()?.takeIf { it.isNotEmpty() },
                 instructor = request.teacherName?.trim()?.takeIf { it.isNotEmpty() } ?: existing.instructor,
+                createdBy = existing.createdBy,
                 courseStatus = mapCourseStatusToDb(request.status),
                 tags = stringifyStringList(request.tags),
                 type = normalizeType(request.category),
@@ -81,10 +86,9 @@ class CatalogQueryService(
     }
 
     @Transactional
-    fun deleteCourse(id: Int) {
-        if (!courseRepository.existsById(id)) {
-            throw NoSuchElementException("课程不存在: $id")
-        }
+    fun deleteCourse(teacherId: Long, id: Int) {
+        val existing = courseRepository.findById(id).orElseThrow { NoSuchElementException("课程不存在: $id") }
+        requireCourseOwner(teacherId, existing)
         jdbcTemplate.update("DELETE FROM module_course WHERE course_id = ?", id)
         courseRepository.deleteById(id)
     }
@@ -138,8 +142,8 @@ class CatalogQueryService(
     }
 
     @Transactional
-    fun addModuleToCourse(courseId: Int, moduleId: Int): List<ModuleOverviewDto> {
-        requireCourse(courseId)
+    fun addModuleToCourse(teacherId: Long, courseId: Int, moduleId: Int): List<ModuleOverviewDto> {
+        requireCourseOwner(teacherId, requireCourse(courseId))
         requireModule(moduleId)
         jdbcTemplate.update(
             "INSERT IGNORE INTO module_course (course_id, module_id) VALUES (?, ?)",
@@ -150,8 +154,8 @@ class CatalogQueryService(
     }
 
     @Transactional
-    fun removeModuleFromCourse(courseId: Int, moduleId: Int): List<ModuleOverviewDto> {
-        requireCourse(courseId)
+    fun removeModuleFromCourse(teacherId: Long, courseId: Int, moduleId: Int): List<ModuleOverviewDto> {
+        requireCourseOwner(teacherId, requireCourse(courseId))
         requireModule(moduleId)
         jdbcTemplate.update(
             "DELETE FROM module_course WHERE course_id = ? AND module_id = ?",
@@ -174,6 +178,7 @@ class CatalogQueryService(
             teacherName = course.instructor?.takeIf { it.isNotBlank() },
             category = normalizeType(course.type),
             createTime = null,
+            createdBy = course.createdBy,
         )
 
     private fun toModuleOverviewDto(
@@ -195,9 +200,12 @@ class CatalogQueryService(
             image = module.imageId?.toString(),
         )
 
-    private fun requireCourse(courseId: Int) {
-        if (!courseRepository.existsById(courseId)) {
-            throw NoSuchElementException("课程不存在: $courseId")
+    private fun requireCourse(courseId: Int): CourseEntity =
+        courseRepository.findById(courseId).orElseThrow { NoSuchElementException("课程不存在: $courseId") }
+
+    private fun requireCourseOwner(teacherId: Long, course: CourseEntity) {
+        if (course.createdBy == null || course.createdBy != teacherId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "只有课程创建者可以修改该课程")
         }
     }
 

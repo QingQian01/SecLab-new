@@ -12,6 +12,7 @@ import me.myot233.seclab.userservice.dto.UserProfileResponse
 import me.myot233.seclab.userservice.dto.UserUpdateRequest
 import me.myot233.seclab.userservice.entity.SchoolClassEntity
 import me.myot233.seclab.userservice.entity.UserEntity
+import me.myot233.seclab.userservice.entity.UserRole
 import me.myot233.seclab.userservice.exception.ApiException
 import me.myot233.seclab.userservice.repository.SchoolClassRepository
 import me.myot233.seclab.userservice.repository.UserRepository
@@ -82,6 +83,7 @@ class UserService(
             userGender = normalizeGender(request.userGender),
             classInfo = resolveClass(request.classId, request.userClass),
             isAdmin = false,
+            userRole = UserRole.STUDENT,
             isDeleted = 0,
         )
         userRepository.save(user)
@@ -193,6 +195,7 @@ class UserService(
                 userGender = normalizeGender(request.userGender),
                 classInfo = resolveClass(request.classId, request.userClass),
                 isAdmin = false,
+                userRole = UserRole.STUDENT,
                 isDeleted = 0,
             ),
         )
@@ -350,11 +353,7 @@ class UserService(
     }
 
     private fun resolveUserRole(user: UserEntity): String {
-        if (user.isAdmin == true) {
-            return "admin"
-        }
-        val userId = user.userId ?: return "student"
-        return if (classRepository.existsByAdminId(userId)) "teacher" else "student"
+        return user.userRole.name.lowercase()
     }
 
     private companion object {

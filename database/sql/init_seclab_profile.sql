@@ -730,3 +730,131 @@ INSERT IGNORE INTO `task_knowledge_point` (`module_id`, `task_id`, `knowledge_po
   (1, 1, 101, 1.00), (1, 2, 102, 1.00), (2, 1, 201, 1.00), (3, 1, 301, 1.00),
   (4, 1, 401, 1.00), (4, 2, 402, 1.00), (5, 1, 501, 1.00), (6, 1, 601, 1.00);
 
+-- Teacher workspace: personal bookmarks over the live student-generated
+-- question stream. This is not an approval or publishing workflow.
+CREATE TABLE IF NOT EXISTS `teacher_typical_question` (
+  `teacher_id` BIGINT NOT NULL,
+  `generated_question_id` VARCHAR(64) NOT NULL,
+  `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`teacher_id`, `generated_question_id`),
+  UNIQUE KEY `uk_teacher_typical_question`
+    (`teacher_id`, `generated_question_id`),
+  KEY `idx_typical_question_question` (`generated_question_id`, `created_at`),
+  CONSTRAINT `fk_typical_question_generated`
+    FOREIGN KEY (`generated_question_id`)
+    REFERENCES `generated_question` (`generated_question_id`)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- Manual teacher analysis for one student in one owned teaching class.
+-- No history table is kept; a failed refresh preserves the previous result.
+CREATE TABLE IF NOT EXISTS `teacher_student_analysis` (
+  `teacher_id` BIGINT NOT NULL,
+  `teaching_class_id` BIGINT NOT NULL,
+  `student_id` BIGINT NOT NULL,
+  `analysis_status` VARCHAR(16) NOT NULL DEFAULT 'IDLE',
+  `data_cutoff_at` DATETIME(6) NULL,
+  `analysis_json` JSON NULL,
+  `source_stats_json` JSON NULL,
+  `last_attempt_at` DATETIME(6) NULL,
+  `last_error_message` VARCHAR(500) NULL,
+  `generated_at` DATETIME(6) NULL,
+  `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+    ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`teacher_id`, `teaching_class_id`, `student_id`),
+  KEY `idx_student_analysis_class_status`
+    (`teaching_class_id`, `analysis_status`, `updated_at`),
+  KEY `idx_student_analysis_student` (`student_id`, `updated_at`),
+  CONSTRAINT `chk_teacher_student_analysis_status`
+    CHECK (`analysis_status` IN ('IDLE', 'RUNNING', 'READY'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- One row per teaching class: only the latest successful manual analysis is
+-- retained. A failed refresh keeps analysis_json and records the error.
+CREATE TABLE IF NOT EXISTS `teacher_class_analysis` (
+  `teaching_class_id` BIGINT NOT NULL,
+  `requested_by` BIGINT NULL,
+  `analysis_status` VARCHAR(16) NOT NULL DEFAULT 'IDLE',
+  `data_cutoff_at` DATETIME(6) NULL,
+  `analysis_json` JSON NULL,
+  `source_stats_json` JSON NULL,
+  `last_attempt_at` DATETIME(6) NULL,
+  `last_error_message` VARCHAR(500) NULL,
+  `generated_at` DATETIME(6) NULL,
+  `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+    ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`teaching_class_id`),
+  KEY `idx_teacher_analysis_status` (`analysis_status`, `updated_at`),
+  CONSTRAINT `chk_teacher_analysis_status`
+    CHECK (`analysis_status` IN ('IDLE', 'RUNNING', 'READY'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Course is the primary analysis unit. Class-wide and per-student results use
+-- the same table and are separated by analysis_scope + student_id.
+CREATE TABLE IF NOT EXISTS `teacher_course_analysis` (
+  `teacher_id` BIGINT NOT NULL,
+  `teaching_class_id` BIGINT NOT NULL,
+  `course_id` INT NOT NULL,
+  `analysis_scope` VARCHAR(16) NOT NULL,
+  `student_id` BIGINT NOT NULL DEFAULT 0,
+  `analysis_status` VARCHAR(16) NOT NULL DEFAULT 'IDLE',
+  `analysis_json` LONGTEXT NULL,
+  `source_stats_json` LONGTEXT NULL,
+  `data_cutoff_at` DATETIME(6) NULL,
+  `last_attempt_at` DATETIME(6) NULL,
+  `last_error_message` VARCHAR(500) NULL,
+  `generated_at` DATETIME(6) NULL,
+  `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+    ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`teacher_id`, `teaching_class_id`, `course_id`, `analysis_scope`, `student_id`),
+  KEY `idx_teacher_course_analysis_lookup`
+    (`teaching_class_id`, `course_id`, `analysis_scope`, `student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Teacher-created focus groups, targeted practice and lesson examples.
+CREATE TABLE IF NOT EXISTS `teacher_intervention` (
+  `intervention_id` BIGINT NOT NULL AUTO_INCREMENT,
+  `teacher_id` BIGINT NOT NULL,
+  `teaching_class_id` BIGINT NOT NULL,
+  `title` VARCHAR(255) NOT NULL,
+  `action_type` VARCHAR(32) NOT NULL,
+  `knowledge_point_id` BIGINT NULL,
+  `description` TEXT NULL,
+  `status` VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+  `baseline_at` DATETIME(6) NOT NULL,
+  `due_at` DATETIME(6) NOT NULL,
+  `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`intervention_id`),
+  KEY `idx_intervention_class_status_due` (`teaching_class_id`, `status`, `due_at`),
+  KEY `idx_intervention_teacher_time` (`teacher_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `teacher_intervention_student` (
+  `intervention_id` BIGINT NOT NULL,
+  `student_id` BIGINT NOT NULL,
+  `baseline_snapshot_json` JSON NULL,
+  `latest_snapshot_json` JSON NULL,
+  `assignment_status` VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+  `training_session_id` VARCHAR(64) NULL,
+  `started_at` DATETIME(6) NULL,
+  `completed_at` DATETIME(6) NULL,
+  `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`intervention_id`, `student_id`),
+  KEY `idx_intervention_student_status` (`student_id`, `assignment_status`, `updated_at`),
+  KEY `idx_intervention_training_session` (`training_session_id`),
+  CONSTRAINT `fk_intervention_student_parent`
+    FOREIGN KEY (`intervention_id`) REFERENCES `teacher_intervention` (`intervention_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `teacher_intervention_question` (
+  `intervention_id` BIGINT NOT NULL,
+  `generated_question_id` VARCHAR(64) NOT NULL,
+  `usage_type` VARCHAR(32) NOT NULL,
+  `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`intervention_id`, `generated_question_id`, `usage_type`),
+  KEY `idx_intervention_question` (`generated_question_id`, `created_at`),
+  CONSTRAINT `fk_intervention_question_parent`
+    FOREIGN KEY (`intervention_id`) REFERENCES `teacher_intervention` (`intervention_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

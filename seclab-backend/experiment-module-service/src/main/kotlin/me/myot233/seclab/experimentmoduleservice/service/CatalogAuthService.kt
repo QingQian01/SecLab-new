@@ -28,7 +28,7 @@ class CatalogAuthService(
         val userId = parseUserId(token)
         val user = jdbcTemplate.query(
             """
-            SELECT user_id, COALESCE(is_admin + 0, 0) AS is_admin
+            SELECT user_id, user_role
             FROM `user`
             WHERE user_id = ? AND COALESCE(is_deleted, 0) = 0
             LIMIT 1
@@ -36,30 +36,17 @@ class CatalogAuthService(
             { rs, _ ->
                 mapOf(
                     "userId" to rs.getLong("user_id"),
-                    "isAdmin" to rs.getInt("is_admin"),
+                    "userRole" to rs.getString("user_role"),
                 )
             },
             userId,
         ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token user does not exist")
 
-        if (user["isAdmin"] == 1) {
-            return CatalogAuthContext(userId = userId, role = "admin")
-        }
-
-        val managedClassCount = jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*)
-            FROM `class`
-            WHERE COALESCE(is_end, 0) = 0 AND admin_id = ?
-            """.trimIndent(),
-            Int::class.java,
-            userId,
-        ) ?: 0
-        if (managedClassCount > 0) {
+        if (user["userRole"] == "TEACHER") {
             return CatalogAuthContext(userId = userId, role = "teacher")
         }
 
-        throw ResponseStatusException(HttpStatus.FORBIDDEN, "Only teacher or admin accounts can modify course modules")
+        throw ResponseStatusException(HttpStatus.FORBIDDEN, "Only teacher accounts can modify courses")
     }
 
     private fun extractBearerToken(authorizationHeader: String?): String {

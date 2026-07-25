@@ -11,7 +11,6 @@ from training_repository import ensure_training_schema
 
 
 USER_SERVICE_SCHEMA = "userservice"
-VALID_REVIEW_STATUSES = {"PENDING_REVIEW", "APPROVED", "REJECTED", "NEEDS_REVISION"}
 CLASS_NAME_ALIASES = {
     "Cyber Security 231": "网络安全231班",
     "Cyber Security 232": "网络安全232班",
@@ -202,6 +201,49 @@ def _current_user_id(current_user: Optional[dict[str, Any]], fallback: Optional[
     if current_user and current_user.get("user_id") is not None:
         return int(current_user["user_id"])
     return fallback
+
+
+def require_owned_teaching_class(teacher_id: int, teaching_class_id: int) -> dict[str, Any]:
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT teaching_class_id, teacher_id, class_name, status
+                FROM `{USER_SERVICE_SCHEMA}`.`teaching_class`
+                WHERE teaching_class_id = %(teaching_class_id)s
+                LIMIT 1
+                """,
+                {"teaching_class_id": teaching_class_id},
+            )
+            row = cursor.fetchone()
+    if not row:
+        raise KeyError(f"teaching class does not exist: {teaching_class_id}")
+    if int(row.get("teacher_id") or 0) != int(teacher_id):
+        raise PermissionError("teaching class is outside current teacher scope")
+    return row
+
+
+def require_student_in_owned_teaching_class(
+    teacher_id: int,
+    teaching_class_id: int,
+    student_id: int,
+) -> None:
+    require_owned_teaching_class(teacher_id, teaching_class_id)
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT 1
+                FROM `{USER_SERVICE_SCHEMA}`.`teaching_class_student`
+                WHERE teaching_class_id = %(teaching_class_id)s
+                  AND student_id = %(student_id)s
+                LIMIT 1
+                """,
+                {"teaching_class_id": teaching_class_id, "student_id": student_id},
+            )
+            membership = cursor.fetchone()
+    if not membership:
+        raise PermissionError("student is outside the selected teaching class")
 
 
 def _sql_in_condition(column: str, values: Optional[list[int]], params: dict[str, Any], prefix: str) -> str:
@@ -788,26 +830,36 @@ def list_class_students(class_id: int, current_user: Optional[dict[str, Any]] = 
     return {"success": True, "classId": class_id, "items": items}
 
 
-def get_student_profile_for_teacher(user_id: int, current_user: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def get_student_profile_for_teacher(
+    user_id: int,
+    current_user: Optional[dict[str, Any]] = None,
+    teaching_class_id: Optional[int] = None,
+) -> dict[str, Any]:
     _ensure_teacher_source_schemas()
-    class_ids = _scope_class_ids(current_user)
+    actor_id = _current_user_id(current_user)
+    if actor_id is None:
+        raise PermissionError("teacher identity is required")
+    if teaching_class_id is not None:
+        require_student_in_owned_teaching_class(actor_id, teaching_class_id, user_id)
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 f"""
-                SELECT class_id_class_id
-                FROM `{USER_SERVICE_SCHEMA}`.`user`
-                WHERE user_id = %(user_id)s
-                  AND COALESCE(is_deleted, 0) = 0
+                SELECT u.user_id
+                FROM `{USER_SERVICE_SCHEMA}`.`user` u
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs
+                  ON tcs.student_id = u.user_id
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class` tc
+                  ON tc.teaching_class_id = tcs.teaching_class_id
+                WHERE u.user_id = %(user_id)s
+                  AND tc.teacher_id = %(teacher_id)s
+                  AND COALESCE(u.is_deleted, 0) = 0
                 LIMIT 1
                 """,
-                {"user_id": user_id},
+                {"user_id": user_id, "teacher_id": actor_id},
             )
             student_row = cursor.fetchone()
             if not student_row:
-                raise KeyError(f"studentId does not exist: {user_id}")
-            student_class_id = _to_int(student_row.get("class_id_class_id"))
-            if class_ids is not None and student_class_id not in class_ids:
                 raise PermissionError("studentId is outside current teacher scope")
     latest_profile = get_latest_student_profile(user_id)
     dashboard = get_profile_dashboard(user_id)
@@ -868,127 +920,337 @@ def get_student_profile_for_teacher(user_id: int, current_user: Optional[dict[st
     }
 
 
+VALID_ANSWER_RESULTS = {"correct", "incorrect", "attempted", "unanswered"}
+
+
+def _normalize_answer_result(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip().lower() or None
+    if normalized and normalized not in VALID_ANSWER_RESULTS:
+        raise ValueError("answerResult only supports correct, incorrect, attempted, or unanswered")
+    return normalized
+
+
+def map_generated_question_record(row: dict[str, Any]) -> dict[str, Any]:
+    raw_ai = _json_loads(row.get("raw_ai_json"), {})
+    latest_attempt = None
+    if row.get("latest_attempt_id"):
+        correct_value = row.get("latest_is_correct")
+        latest_attempt = {
+            "attemptId": row.get("latest_attempt_id"),
+            "answer": _json_loads(row.get("latest_answer_json"), row.get("latest_answer_json")),
+            "isCorrect": None if correct_value is None else bool(_to_int(correct_value)),
+            "score": _round(row.get("latest_score")),
+            "costTime": row.get("latest_cost_time"),
+            "submittedAt": _iso(row.get("latest_submitted_at")),
+        }
+    generation_reason = _first_json_value(
+        raw_ai,
+        ("generationReason", "generation_reason", "reason", "diagnosisReason", "diagnosis_reason"),
+    )
+    return {
+        "generatedQuestionId": row.get("generated_question_id"),
+        "trainingSessionId": row.get("training_session_id"),
+        "student": {
+            "studentId": _to_int(row.get("user_id")),
+            "studentNumber": row.get("user_student_number"),
+            "studentName": row.get("user_name") or row.get("user_student_number") or "未知学生",
+        },
+        "teachingClassId": _to_int(row.get("teaching_class_id")),
+        "teachingClassName": row.get("teaching_class_name"),
+        "courseId": _to_int(row.get("course_id")) if row.get("course_id") is not None else None,
+        "courseName": row.get("course_name"),
+        "knowledgePointId": _to_int(row.get("knowledge_point_id")) if row.get("knowledge_point_id") is not None else None,
+        "knowledgePointName": row.get("knowledge_point_name"),
+        "questionType": row.get("question_type"),
+        "difficulty": row.get("difficulty"),
+        "title": row.get("title") or "个性化训练题",
+        "stem": row.get("stem") or "",
+        "options": _json_loads(row.get("options_json"), []),
+        "generationReason": generation_reason,
+        "standardAnswer": row.get("standard_answer"),
+        "referenceAnswer": row.get("reference_answer"),
+        "explanation": row.get("explanation"),
+        "latestAttempt": latest_attempt,
+        "attemptCount": _to_int(row.get("attempt_count")),
+        "generatedAt": _iso(row.get("created_at")),
+        "isTypical": bool(_to_int(row.get("is_typical"))),
+    }
+
+
+def _generated_question_filters(
+    *,
+    teaching_class_id: Optional[int],
+    course_id: Optional[int],
+    knowledge_point_id: Optional[int],
+    student_id: Optional[int],
+    answer_result: Optional[str],
+    typical_only: bool,
+    date_from: Optional[date],
+    date_to: Optional[date],
+    generated_question_id: Optional[str] = None,
+) -> tuple[str, dict[str, Any]]:
+    params: dict[str, Any] = {}
+    conditions: list[str] = []
+    values = {
+        "teaching_class_id": (teaching_class_id, "tcs.teaching_class_id"),
+        "course_id": (course_id, "ts.course_id"),
+        "knowledge_point_id": (knowledge_point_id, "gq.knowledge_point_id"),
+        "student_id": (student_id, "ts.user_id"),
+        "generated_question_id": (generated_question_id, "gq.generated_question_id"),
+    }
+    for key, (value, column) in values.items():
+        if value is not None:
+            params[key] = value
+            conditions.append(f"AND {column} = %({key})s")
+    normalized_answer = _normalize_answer_result(answer_result)
+    if normalized_answer == "correct":
+        conditions.append("AND latest.is_correct = 1")
+    elif normalized_answer == "incorrect":
+        conditions.append("AND latest.is_correct = 0")
+    elif normalized_answer == "attempted":
+        conditions.append("AND latest.attempt_id IS NOT NULL")
+    elif normalized_answer == "unanswered":
+        conditions.append("AND latest.attempt_id IS NULL")
+    if typical_only:
+        conditions.append("AND typical.teacher_id IS NOT NULL")
+    if date_from is not None:
+        params["date_from"] = date_from
+        conditions.append("AND gq.created_at >= %(date_from)s")
+    if date_to is not None:
+        params["date_to"] = date_to
+        conditions.append("AND gq.created_at < DATE_ADD(%(date_to)s, INTERVAL 1 DAY)")
+    return "\n".join(conditions), params
+
+
+def _generated_question_from_sql(actor_id: int, conditions: str) -> str:
+    return f"""
+        FROM generated_question gq
+        INNER JOIN training_session ts ON ts.training_session_id = gq.training_session_id
+        INNER JOIN `{USER_SERVICE_SCHEMA}`.`user` u ON u.user_id = ts.user_id
+        INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs ON tcs.student_id = ts.user_id
+        INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class` tc
+          ON tc.teaching_class_id = tcs.teaching_class_id
+        LEFT JOIN `{USER_SERVICE_SCHEMA}`.`course` c ON c.id = ts.course_id
+        LEFT JOIN knowledge_point kp ON kp.knowledge_point_id = gq.knowledge_point_id
+        LEFT JOIN (
+            SELECT attempt.generated_question_id, COUNT(*) AS attempt_count
+            FROM generated_question_attempt attempt
+            GROUP BY attempt.generated_question_id
+        ) attempt_stats ON attempt_stats.generated_question_id = gq.generated_question_id
+        LEFT JOIN generated_question_attempt latest
+          ON latest.attempt_id = (
+              SELECT newest.attempt_id
+              FROM generated_question_attempt newest
+              WHERE newest.generated_question_id = gq.generated_question_id
+              ORDER BY newest.submitted_at DESC, newest.attempt_id DESC
+              LIMIT 1
+          )
+        LEFT JOIN teacher_typical_question typical
+          ON typical.generated_question_id = gq.generated_question_id
+         AND typical.teacher_id = {int(actor_id)}
+        WHERE COALESCE(u.is_deleted, 0) = 0
+          AND tc.teacher_id = {int(actor_id)}
+          {conditions}
+    """
+
+
+def _generated_question_select_sql() -> str:
+    return """
+        SELECT
+            gq.*,
+            ts.user_id,
+            ts.course_id,
+            u.user_student_number,
+            u.user_name,
+            tc.teaching_class_id,
+            tc.class_name AS teaching_class_name,
+            c.course_name,
+            kp.name AS knowledge_point_name,
+            COALESCE(attempt_stats.attempt_count, 0) AS attempt_count,
+            latest.attempt_id AS latest_attempt_id,
+            latest.answer_json AS latest_answer_json,
+            latest.is_correct AS latest_is_correct,
+            latest.score AS latest_score,
+            latest.cost_time AS latest_cost_time,
+            latest.submitted_at AS latest_submitted_at,
+            CASE WHEN typical.teacher_id IS NULL THEN 0 ELSE 1 END AS is_typical
+    """
+
+
 def list_generated_questions_for_teacher(
     *,
     teacher_id: Optional[int] = None,
     current_user: Optional[dict[str, Any]] = None,
-    status: Optional[str] = None,
+    teaching_class_id: Optional[int] = None,
+    course_id: Optional[int] = None,
+    knowledge_point_id: Optional[int] = None,
+    student_id: Optional[int] = None,
+    answer_result: Optional[str] = None,
+    typical_only: bool = False,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
     page: int = 1,
     size: int = 20,
 ) -> dict[str, Any]:
     _ensure_teacher_source_schemas()
+    actor_id = _current_user_id(current_user, teacher_id)
+    if actor_id is None:
+        raise PermissionError("teacher identity is required")
     page = max(1, page)
     size = max(1, min(size, 100))
-    offset = (page - 1) * size
-    actor_id = _current_user_id(current_user, teacher_id)
-    class_ids = _scope_class_ids(current_user)
-    normalized_status = status.strip().upper() if status and status.strip() else None
-    if normalized_status and normalized_status not in VALID_REVIEW_STATUSES:
-        raise ValueError("status only supports PENDING_REVIEW, APPROVED, REJECTED, or NEEDS_REVISION")
-
+    conditions, params = _generated_question_filters(
+        teaching_class_id=teaching_class_id,
+        course_id=course_id,
+        knowledge_point_id=knowledge_point_id,
+        student_id=student_id,
+        answer_result=answer_result,
+        typical_only=typical_only,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    base_from = _generated_question_from_sql(actor_id, conditions)
     with get_connection() as conn:
         with conn.cursor() as cursor:
-            users = _fetch_users(cursor, class_ids=class_ids)
-            params: dict[str, Any] = {}
-            class_condition = _sql_in_condition("u.class_id_class_id", class_ids, params, "gq_class")
-            status_expr = """
-                COALESCE(
-                    CASE
-                        WHEN JSON_VALID(gq.raw_ai_json) THEN JSON_UNQUOTE(JSON_EXTRACT(gq.raw_ai_json, '$.reviewStatus'))
-                        ELSE NULL
-                    END,
-                    CASE
-                        WHEN JSON_VALID(gq.raw_ai_json) THEN JSON_UNQUOTE(JSON_EXTRACT(gq.raw_ai_json, '$.review_status'))
-                        ELSE NULL
-                    END,
-                    'PENDING_REVIEW'
-                )
-            """
-            status_condition = ""
-            if normalized_status:
-                params["status"] = normalized_status
-                status_condition = f" AND UPPER({status_expr}) = %(status)s"
-
-            base_from = f"""
-                FROM generated_question gq
-                LEFT JOIN training_session ts
-                  ON ts.training_session_id = gq.training_session_id
-                LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u
-                  ON u.user_id = ts.user_id
-                LEFT JOIN generated_question_attempt gqa
-                  ON gqa.generated_question_id = gq.generated_question_id
-                WHERE 1 = 1
-                  {class_condition}
-                  {status_condition}
-            """
             cursor.execute(
-                f"SELECT COUNT(DISTINCT gq.generated_question_id) AS total {base_from}",
+                "SELECT COUNT(*) AS total FROM ("
+                "SELECT gq.generated_question_id, tc.teaching_class_id "
+                f"{base_from} GROUP BY gq.generated_question_id, tc.teaching_class_id"
+                ") records",
                 params,
             )
             total = _to_int((cursor.fetchone() or {}).get("total"))
-            query_params = dict(params)
-            query_params.update({"limit": size, "offset": offset})
+            query_params = {**params, "limit": size, "offset": (page - 1) * size}
             cursor.execute(
                 f"""
-                SELECT
-                    gq.*,
-                    ts.user_id,
-                    COUNT(gqa.attempt_id) AS attempt_count,
-                    AVG(gqa.score) AS average_score
+                {_generated_question_select_sql()}
                 {base_from}
-                GROUP BY gq.generated_question_id, ts.user_id
-                ORDER BY gq.created_at DESC
+                ORDER BY gq.created_at DESC, gq.generated_question_id, tc.teaching_class_id
                 LIMIT %(limit)s OFFSET %(offset)s
                 """,
                 query_params,
             )
             rows = list(cursor.fetchall() or [])
-
-    items = []
-    for row in rows:
-        raw_ai = _json_loads(row.get("raw_ai_json"), {})
-        review_status = str(
-            _json_field(raw_ai, "reviewStatus", default=None)
-            or _json_field(raw_ai, "review_status", default=None)
-            or "PENDING_REVIEW"
-        )
-        quality_score = _json_field(raw_ai, "qualityScore", default=None)
-        if quality_score is None:
-            quality_score = _json_field(raw_ai, "quality_score", default=None)
-        user_id = _to_int(row.get("user_id"))
-        user = users.get(user_id)
-        item = {
-            "generatedQuestionId": row.get("generated_question_id"),
-            "userId": user_id,
-            "username": _student_name(user, user_id) if user_id else "未知学生",
-            "title": row.get("title") or "个性化训练题",
-            "stem": row.get("stem") or "",
-            "questionType": row.get("question_type"),
-            "difficulty": row.get("difficulty"),
-            "knowledgeTags": _question_tags(raw_ai),
-            "qualityScore": _round(quality_score),
-            "reviewStatus": review_status,
-            "standardAnswer": row.get("standard_answer"),
-            "referenceAnswer": row.get("reference_answer"),
-            "explanation": row.get("explanation"),
-            "teachingObjective": _first_json_value(raw_ai, ("teachingObjective", "teaching_objective", "objective")),
-            "expectedSkill": _first_json_value(raw_ai, ("expectedSkill", "expected_skill", "skill")),
-            "gradingRubric": _first_json_value(
-                raw_ai,
-                ("gradingRubric", "grading_rubric", "scoringRubric", "scoring_rubric"),
-                default=_json_loads(row.get("scoring_rubric_json"), []),
-            ),
-            "attemptCount": _to_int(row.get("attempt_count")),
-            "averageScore": _round(row.get("average_score")),
-            "createdAt": _iso(row.get("created_at")),
-        }
-        items.append(item)
-
     return {
         "success": True,
         "teacherId": actor_id,
-        "items": items,
+        "items": [map_generated_question_record(row) for row in rows],
         "total": total,
         "page": page,
         "size": size,
     }
+
+
+def get_generated_question_for_teacher(
+    generated_question_id: str,
+    *,
+    current_user: dict[str, Any],
+) -> dict[str, Any]:
+    actor_id = _current_user_id(current_user)
+    if actor_id is None:
+        raise PermissionError("teacher identity is required")
+    conditions, params = _generated_question_filters(
+        teaching_class_id=None,
+        course_id=None,
+        knowledge_point_id=None,
+        student_id=None,
+        answer_result=None,
+        typical_only=False,
+        date_from=None,
+        date_to=None,
+        generated_question_id=generated_question_id,
+    )
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"{_generated_question_select_sql()} {_generated_question_from_sql(actor_id, conditions)} "
+                "ORDER BY tc.updated_at DESC LIMIT 1",
+                params,
+            )
+            row = cursor.fetchone()
+    if not row:
+        raise KeyError(f"generated question does not exist: {generated_question_id}")
+    return map_generated_question_record(row)
+
+
+def mark_generated_question_typical(teacher_id: int, generated_question_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM generated_question WHERE generated_question_id = %(question_id)s LIMIT 1",
+                {"question_id": generated_question_id},
+            )
+            if not cursor.fetchone():
+                raise KeyError(f"generated question does not exist: {generated_question_id}")
+            cursor.execute(
+                """
+                INSERT IGNORE INTO teacher_typical_question (teacher_id, generated_question_id, created_at)
+                VALUES (%(teacher_id)s, %(question_id)s, NOW(6))
+                """,
+                {"teacher_id": teacher_id, "question_id": generated_question_id},
+            )
+        conn.commit()
+    return {"generatedQuestionId": generated_question_id, "isTypical": True}
+
+
+def unmark_generated_question_typical(teacher_id: int, generated_question_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM teacher_typical_question
+                WHERE teacher_id = %(teacher_id)s AND generated_question_id = %(question_id)s
+                """,
+                {"teacher_id": teacher_id, "question_id": generated_question_id},
+            )
+        conn.commit()
+    return {"generatedQuestionId": generated_question_id, "isTypical": False}
+
+
+def summarize_generated_questions_for_class(
+    teaching_class_id: int,
+    current_user: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    actor_id = _current_user_id(current_user)
+    if actor_id is not None:
+        require_owned_teaching_class(actor_id, teaching_class_id)
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    gq.knowledge_point_id,
+                    COALESCE(kp.name, '未标注知识点') AS knowledge_point_name,
+                    COUNT(DISTINCT ts.user_id) AS student_count,
+                    COUNT(DISTINCT gq.generated_question_id) AS generated_question_count,
+                    COUNT(gqa.attempt_id) AS attempted_count,
+                    SUM(CASE WHEN gqa.is_correct = 0 THEN 1 ELSE 0 END) AS incorrect_count,
+                    GROUP_CONCAT(DISTINCT gq.generated_question_id ORDER BY gq.created_at DESC SEPARATOR ',') AS question_ids
+                FROM generated_question gq
+                INNER JOIN training_session ts ON ts.training_session_id = gq.training_session_id
+                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs ON tcs.student_id = ts.user_id
+                LEFT JOIN knowledge_point kp ON kp.knowledge_point_id = gq.knowledge_point_id
+                LEFT JOIN generated_question_attempt gqa ON gqa.generated_question_id = gq.generated_question_id
+                WHERE tcs.teaching_class_id = %(teaching_class_id)s
+                GROUP BY gq.knowledge_point_id, kp.name
+                ORDER BY incorrect_count DESC, generated_question_count DESC
+                """,
+                {"teaching_class_id": teaching_class_id},
+            )
+            rows = list(cursor.fetchall() or [])
+    items = []
+    for row in rows:
+        attempted_count = _to_int(row.get("attempted_count"))
+        incorrect_count = _to_int(row.get("incorrect_count"))
+        items.append(
+            {
+                "knowledgePointId": row.get("knowledge_point_id"),
+                "knowledgePointName": row.get("knowledge_point_name"),
+                "studentCount": _to_int(row.get("student_count")),
+                "generatedQuestionCount": _to_int(row.get("generated_question_count")),
+                "attemptedCount": attempted_count,
+                "incorrectCount": incorrect_count,
+                "incorrectRate": round(incorrect_count / attempted_count, 4) if attempted_count else 0.0,
+                "representativeQuestionIds": str(row.get("question_ids") or "").split(",")[:3],
+            }
+        )
+    return {"teachingClassId": teaching_class_id, "items": items}

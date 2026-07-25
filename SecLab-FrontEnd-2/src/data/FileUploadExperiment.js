@@ -17,16 +17,18 @@ export const FileUploadExperiment = {
           content: '文件上传漏洞可能导致哪些安全风险？',
           score: 2,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['服务器资源消耗', '远程代码执行', '数据库连接超时', '网络流量增加']
+          type: 'single-choice',
+          options: ['服务器资源消耗', '远程代码执行', '数据库连接超时', '网络流量增加'],
+          answer: [1]
         },
         {
           id: 2,
           content: '以下哪种文件类型上传后可能导致服务器被控制？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['.txt文本文件', '.pdf文档文件', '.php网站脚本文件', '.csv数据文件']
+          type: 'single-choice',
+          options: ['.txt文本文件', '.pdf文档文件', '.php网站脚本文件', '.csv数据文件'],
+          answer: [2]
         }
       ]
     },
@@ -42,16 +44,18 @@ export const FileUploadExperiment = {
           content: '要绕过仅检查文件扩展名的上传限制，攻击者可能使用什么技术？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['增大文件大小', '修改Content-Type头', '使用特殊字符加密文件', '将文件压缩后上传']
+          type: 'single-choice',
+          options: ['增大文件大小', '修改Content-Type头', '使用特殊字符加密文件', '将文件压缩后上传'],
+          answer: [1]
         },
         {
           id: 2,
           content: '以下哪种PHP代码片段最可能被用作WebShell？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['<?php phpinfo(); ?>', '<?php echo "Hello World"; ?>', '<?php system($_GET["cmd"]); ?>', '<?php $a = 1 + 1; echo $a; ?>']
+          type: 'single-choice',
+          options: ['<?php phpinfo(); ?>', '<?php echo "Hello World"; ?>', '<?php system($_GET["cmd"]); ?>', '<?php $a = 1 + 1; echo $a; ?>'],
+          answer: [2]
         }
       ]
     },
@@ -67,16 +71,18 @@ export const FileUploadExperiment = {
           content: '防御文件上传漏洞时，关于文件类型验证的最佳做法是什么？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['使用黑名单禁止危险文件类型', '使用白名单限制允许的文件类型', '完全禁止文件上传功能', '只允许上传加密文件']
+          type: 'single-choice',
+          options: ['使用黑名单禁止危险文件类型', '使用白名单限制允许的文件类型', '完全禁止文件上传功能', '只允许上传加密文件'],
+          answer: [1]
         },
         {
           id: 2,
           content: '以下哪个措施能有效防止上传的PHP文件被执行？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['将上传的文件重命名为.txt', '在上传目录中禁用PHP引擎', '将所有上传文件设为只读', '定期删除上传文件']
+          type: 'single-choice',
+          options: ['将上传的文件重命名为.txt', '在上传目录中禁用PHP引擎', '将所有上传文件设为只读', '定期删除上传文件'],
+          answer: [1]
         }
       ]
     },
@@ -92,16 +98,18 @@ export const FileUploadExperiment = {
           content: '在案例一中，攻击者是如何绕过文件类型验证的？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['使用自动化工具批量上传文件', '修改文件名和Content-Type', '利用SQL注入漏洞', '破解服务器密码后直接上传文件']
+          type: 'single-choice',
+          options: ['使用自动化工具批量上传文件', '修改文件名和Content-Type', '利用SQL注入漏洞', '破解服务器密码后直接上传文件'],
+          answer: [1]
         },
         {
           id: 2,
           content: '在案例二中，攻击者上传.htaccess文件的目的是什么？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
-          options: ['绕过登录验证', '修改服务器时间', '使服务器将图片文件当作PHP执行', '删除服务器上的其他文件']
+          type: 'single-choice',
+          options: ['绕过登录验证', '修改服务器时间', '使服务器将图片文件当作PHP执行', '删除服务器上的其他文件'],
+          answer: [2]
         }
       ]
     },
@@ -203,7 +211,8 @@ export const FileUploadExperiment = {
           score: 3,
           requiresTarget: false,
           type: 'single-choice',
-          options: ["添加更多数据使文件变大", "修改浏览器User-Agent", "将PHP文件重命名为shell.php.jpg然后在上传请求中改回shell.php", "压缩文件后上传"]
+          options: ["添加更多数据使文件变大", "修改浏览器User-Agent", "将PHP文件重命名为shell.php.jpg然后在上传请求中改回shell.php", "压缩文件后上传"],
+          answer: [2]
         },
         {
           id: 3,

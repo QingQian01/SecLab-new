@@ -18,7 +18,7 @@ export const XSSExperiment = {
           content: 'XSS攻击的全称是什么？',
           score: 2,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['Cross-Site Scripting', 'Cross-Server Security', 'Cross-Site Security', 'Client-Side Scripting'],
           answer: [0] // Cross-Site Scripting
         },
@@ -27,7 +27,7 @@ export const XSSExperiment = {
           content: '以下哪种XSS攻击类型的恶意代码会被存储在服务器中？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['反射型XSS', '存储型XSS', 'DOM型XSS', '以上都不是'],
           answer: [1] // 存储型XSS
         }
@@ -46,7 +46,7 @@ export const XSSExperiment = {
           content: '以下哪个是最常用的XSS测试载荷？',
           score: 3,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['<script>alert(\'XSS\')</script>', '<body>XSS</body>', '<img src="xss.jpg">', '<a href="xss.html">XSS</a>'],
           answer: [0] // <script>alert('XSS')</script>
         },
@@ -55,7 +55,7 @@ export const XSSExperiment = {
           content: '攻击者可以通过XSS攻击获取用户的什么信息？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['操作系统版本', 'Cookie和会话信息', '硬盘序列号', 'BIOS密码'],
           answer: [1] // Cookie和会话信息
         }
@@ -74,7 +74,7 @@ export const XSSExperiment = {
           content: '以下哪个位置最可能存在XSS漏洞？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['静态HTML页面', '用户评论区', '图片文件', 'CSS样式表'],
           answer: [1] // 用户评论区
         },
@@ -83,7 +83,7 @@ export const XSSExperiment = {
           content: '验证XSS漏洞的常用方法是？',
           score: 4,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['使用SQL注入', '尝试DOS攻击', '注入弹出对话框的JavaScript代码', '上传病毒文件'],
           answer: [2] // 注入弹出对话框的JavaScript代码
         }
@@ -111,7 +111,7 @@ export const XSSExperiment = {
           content: '内容安全策略（CSP）的主要作用是什么？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['限制浏览器加载和执行资源的来源', '加密所有网络流量', '验证用户身份', '保护数据库免受注入攻击'],
           answer: [0] // 限制浏览器加载和执行资源的来源
         }
@@ -130,7 +130,7 @@ export const XSSExperiment = {
           content: '在存储型XSS攻击中，恶意代码存储在哪里？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['用户的Cookie中', '浏览器缓存中', '服务器数据库中', '网络路由器中'],
           answer: [2] // 服务器数据库中
         },
@@ -139,7 +139,7 @@ export const XSSExperiment = {
           content: '以下哪个是防御DOM型XSS攻击的有效方法？',
           score: 5,
           requiresTarget: false,
-          type: 'multiple-choice',
+          type: 'single-choice',
           options: ['使用innerHTML插入内容', '使用eval()处理用户输入', '使用textContent而不是innerHTML', '禁用所有JavaScript'],
           answer: [2] // 使用textContent而不是innerHTML
         }

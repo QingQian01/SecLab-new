@@ -2,6 +2,8 @@ package me.myot233.seclab.userservice.entity
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.FetchType
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
@@ -50,6 +52,10 @@ open class UserEntity(
 
     @field:Column(name = "is_admin")
     open var isAdmin: Boolean? = false,
+
+    @field:Enumerated(EnumType.STRING)
+    @field:Column(name = "user_role", nullable = false, length = 16)
+    open var userRole: UserRole = UserRole.STUDENT,
 
     @field:Column(name = "is_deleted")
     open var isDeleted: Int? = 0,
