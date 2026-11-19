@@ -1,15 +1,15 @@
-package me.myot233.seclab.experimentmoduleservice.service
+package service
 
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
-import me.myot233.seclab.experimentmoduleservice.dto.CourseMutationRequest
-import me.myot233.seclab.experimentmoduleservice.dto.CourseSummaryDto
-import me.myot233.seclab.experimentmoduleservice.dto.ModuleMutationRequest
-import me.myot233.seclab.experimentmoduleservice.dto.ModuleOverviewDto
-import me.myot233.seclab.experimentmoduleservice.entity.CourseEntity
-import me.myot233.seclab.experimentmoduleservice.entity.ModuleEntity
-import me.myot233.seclab.experimentmoduleservice.repository.CourseRepository
-import me.myot233.seclab.experimentmoduleservice.repository.ModuleRepository
+import dto.CourseMutationRequest
+import dto.CourseSummaryDto
+import dto.ModuleMutationRequest
+import dto.ModuleOverviewDto
+import entity.CourseEntity
+import entity.ModuleEntity
+import repository.CourseRepository
+import repository.ModuleRepository
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -204,7 +204,8 @@ class CatalogQueryService(
         courseRepository.findById(courseId).orElseThrow { NoSuchElementException("课程不存在: $courseId") }
 
     private fun requireCourseOwner(teacherId: Long, course: CourseEntity) {
-        if (course.createdBy == null || course.createdBy != teacherId) {
+        // 共享课程（createdBy == null）允许任何教师编辑；他人创建的课程仍需创建者本人。
+        if (course.createdBy != null && course.createdBy != teacherId) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "只有课程创建者可以修改该课程")
         }
     }

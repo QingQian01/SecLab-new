@@ -1,4 +1,4 @@
-package me.myot233.seclab.experimentmoduleservice.entity
+package entity
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity

@@ -1,6 +1,6 @@
-package me.myot233.seclab.experimentmoduleservice.exception
+package exception
 
-import me.myot233.seclab.experimentmoduleservice.dto.ApiResponse
+import dto.ApiResponse
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity

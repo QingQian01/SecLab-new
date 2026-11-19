@@ -5,8 +5,11 @@
 # ════════════════════════════════════════════════════════════════
 FROM php:7.4-apache
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
+# 安装系统依赖（更换为阿里云源，解决 Docker 构建时 DNS/网络问题）
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list && \
+    sed -i 's|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get update && apt-get install -y --no-install-recommends \
     libzip-dev \
     zip \
     tcpdump \

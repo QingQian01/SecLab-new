@@ -1,0 +1,21 @@
+[Unit]
+Description=SecLab Image Service
+After=network.target
+
+[Service]
+Type=simple
+User=seclab
+WorkingDirectory=/opt/seclab/SecLab/seclab-backend/image-service
+Environment=MYSQL_HOST=127.0.0.1
+Environment=MYSQL_PORT=3306
+Environment=MYSQL_USER=seclab_app
+Environment=MYSQL_PASSWORD=Seclab@123
+ExecStart=/bin/bash -lc 'exec java -Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -Dspring.jmx.enabled=false -jar /opt/seclab/SecLab/seclab-backend/image-service/build/libs/image-service-0.0.1-SNAPSHOT.jar'
+Restart=on-failure
+RestartSec=5
+MemoryMax=400M
+StandardOutput=append:/opt/seclab/logs/image-service.log
+StandardError=append:/opt/seclab/logs/image-service.err.log
+
+[Install]
+WantedBy=multi-user.target

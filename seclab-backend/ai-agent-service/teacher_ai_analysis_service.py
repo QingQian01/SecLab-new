@@ -465,7 +465,16 @@ def validate_teaching_class_analysis_payload(
 ) -> dict[str, Any]:
     overall_comment = _require_text(payload, "overallComment")
     common_problems = payload.get("commonProblems")
-    if not isinstance(common_problems, list) or not common_problems:
+    if not isinstance(common_problems, list):
+        raise ValueError("commonProblems 必须是数组")
+    # 当 evidenceQuestionIds 为空时，Dify 无法生成题目级共性问题，
+    # 此时允许 commonProblems 为空数组，仅保留 overallComment。
+    if not common_problems:
+        if not evidence_question_ids:
+            return {
+                "overallComment": overall_comment,
+                "commonProblems": [],
+            }
         raise ValueError("commonProblems 不能为空")
     normalized = []
     for raw_item in common_problems[:5]:

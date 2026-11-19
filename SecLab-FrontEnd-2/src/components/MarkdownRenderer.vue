@@ -32,7 +32,18 @@ const renderedContent = computed(() => {
 
 <style scoped>
 .markdown-body {
-  @apply prose prose-slate max-w-none;
+  @apply prose max-w-none;
+  /* 覆盖 prose 默认的灰色系配色（prose-slate 会硬编码 slate 色，夜间模式下文字几乎不可见），
+     改用 DaisyUI 的 base-content (--bc) 让文字颜色随日间/夜间主题自适应变化。 */
+  --tw-prose-body: hsl(var(--bc));
+  --tw-prose-headings: hsl(var(--bc));
+  --tw-prose-bold: hsl(var(--bc));
+  --tw-prose-quotes: hsl(var(--bc));
+  --tw-prose-counters: hsl(var(--bc));
+  --tw-prose-bullets: hsl(var(--bc));
+  --tw-prose-code: hsl(var(--bc));
+  --tw-prose-lead: hsl(var(--bc));
+  --tw-prose-links: hsl(var(--p));
 }
 
 .markdown-body :deep(h1) {
@@ -108,4 +119,4 @@ const renderedContent = computed(() => {
 .markdown-body :deep(pre) {
   max-height: 400px;
 }
-</style> 
+</style>

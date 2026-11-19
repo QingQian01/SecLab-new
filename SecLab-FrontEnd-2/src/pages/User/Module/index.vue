@@ -519,23 +519,53 @@ const getDockerStartEndpoint = (baseId: number): string => {
 };
 
 const getDefaultTargetUrl = (baseId: number): string => {
+  // 开发环境用 localhost 直连，生产环境用 nginx 代理路径
+  const isDev = import.meta.env.DEV;
+
+  if (isDev) {
+    // 开发环境：直连本地容器端口
+    switch (baseId) {
+      case 1:
+        return 'http://localhost:8091/index.php';
+      case 2:
+        return 'http://localhost:8092/index.php';
+      case 3:
+        return 'http://localhost:8093/index.php';
+      case 4:
+        return 'http://localhost:8090/index.html';
+      case 5:
+        return 'http://localhost:8094/index.php';
+      case 6:
+        return 'http://localhost:8095/index.php';
+      case 15:
+        return 'http://localhost:8096/';
+      case 16:
+        return 'http://localhost:8896/index.php';
+      default:
+        return 'http://localhost:8091/index.php';
+    }
+  }
+
+  // 生产环境：通过 nginx 代理路径访问容器
   switch (baseId) {
     case 1:
-      return 'http://localhost:8091/index.php';
+      return '/targets/sqli/index.php';
     case 2:
-      return 'http://localhost:8092/index.php';
+      return '/targets/xss/index.php';
     case 3:
-      return 'http://localhost:8093/index.php';
+      return '/targets/csrf/index.php';
     case 4:
-      return 'http://localhost:8090/index.html';
+      return '/targets/cmd/index.html';
     case 5:
-      return 'http://localhost:8094/index.php';
+      return '/targets/upload/index.php';
     case 6:
-      return 'http://localhost:8095/index.php';
+      return '/targets/dir/index.php';
+    case 15:
+      return '/targets/stack/';
     case 16:
-      return 'http://localhost:8896/index.php';
+      return '/targets/protocol/index.php';
     default:
-      return 'http://localhost:8091/index.php';
+      return '/targets/sqli/index.php';
   }
 };
 

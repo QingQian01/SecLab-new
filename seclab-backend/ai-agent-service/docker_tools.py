@@ -4,12 +4,11 @@ Docker SDK 工具模块
 以及容器运行数据采集（供事件上报使用）
 
 【容器命名规则说明】
-Docker Compose 未指定 container_name 时，自动生成规则为：
-  <目录名>-<服务名>-<序号>
-例如：sqli-lab 目录下的 web 服务 → sqli-lab-web-1
-      sqli-lab 目录下的 db  服务 → sqli-lab-db-1
+Docker Compose 未指定 container_name 时，命名规则因版本而异：
+  - V2 (docker compose)：  <目录名>-<服务名>-<序号>  例如 sqli-lab-web-1
+  - V1 (docker-compose)：  <目录名>_<服务名>_<序号>  例如 sqli-lab_web_1
 
-因此调用本模块时，container_name 应使用完整名称，如 sqli-lab-web-1
+本模块通过 _find_container 自动兼容两种命名格式，调用方可以使用任意一种格式。
 """
 import docker
 import re
@@ -36,6 +35,55 @@ def _is_allowed(name: str) -> bool:
                for prefix in ALLOWED_CONTAINER_PREFIXES)
 
 
+def _find_container(client: docker.DockerClient, container_name: str):
+    """
+    查找容器，自动兼容 docker-compose V1（下划线）和 V2（连字符）命名格式。
+
+    V2 格式 csrf-lab-web-1 对应 V1 格式 csrf-lab_web_1
+    （目录名中的连字符保留，仅最后两段分隔符从 - 变 _）
+
+    先用原始名称查找，找不到时自动尝试 V1↔V2 格式转换。
+    """
+    # 1. 先用原始名称查找
+    try:
+        return client.containers.get(container_name)
+    except NotFound:
+        pass
+
+    v1_name = container_name  # 默认值，避免未定义
+
+    # 2. V2→V1 转换：把最后两个 - 替换成 _
+    #    例如 csrf-lab-web-1 → csrf-lab_web_1
+    parts = container_name.rsplit('-', 2)
+    if len(parts) == 3:
+        v1_name = f"{parts[0]}_{parts[1]}_{parts[2]}"
+        if v1_name != container_name:
+            try:
+                return client.containers.get(v1_name)
+            except NotFound:
+                pass
+
+    # 3. 全替换 - → _（兜底）
+    alt_name = container_name.replace('-', '_')
+    if alt_name != container_name and alt_name != v1_name:
+        try:
+            return client.containers.get(alt_name)
+        except NotFound:
+            pass
+
+    # 4. V1→V2 转换：把最后两个 _ 替换成 -
+    parts_v2 = container_name.rsplit('_', 2)
+    if len(parts_v2) == 3:
+        v2_name = f"{parts_v2[0]}-{parts_v2[1]}-{parts_v2[2]}"
+        if v2_name != container_name:
+            try:
+                return client.containers.get(v2_name)
+            except NotFound:
+                pass
+
+    raise NotFound(f"容器 '{container_name}' 不存在（已尝试 V1/V2 命名格式转换）")
+
+
 def get_container_status(container_name: Optional[str] = None) -> dict:
     """
     获取容器状态。
@@ -51,7 +99,7 @@ def get_container_status(container_name: Optional[str] = None) -> dict:
             if not _is_allowed(container_name):
                 return {"success": False, "error": f"不允许访问容器 '{container_name}'"}
             try:
-                c = client.containers.get(container_name)
+                c = _find_container(client, container_name)
                 return {
                     "success": True,
                     "data": {
@@ -87,7 +135,7 @@ def get_container_logs(container_name: str, tail: int = 100) -> dict:
     tail = min(tail, MAX_LOG_LINES)
     try:
         client = get_client()
-        c = client.containers.get(container_name)
+        c = _find_container(client, container_name)
         logs = c.logs(tail=tail, timestamps=True).decode("utf-8", errors="replace")
         return {"success": True, "container": container_name, "logs": logs}
     except NotFound:
@@ -102,7 +150,7 @@ def exec_in_container(container_name: str, command: str) -> dict:
         return {"success": False, "error": "不允许操作该容器"}
     try:
         client = get_client()
-        c = client.containers.get(container_name)
+        c = _find_container(client, container_name)
         if c.status != "running":
             return {"success": False, "error": f"容器 '{container_name}' 当前未运行（状态: {c.status}）"}
         exit_code, output = c.exec_run(command, demux=False)
@@ -125,7 +173,7 @@ def stop_container(container_name: str, timeout: int = 10) -> dict:
         return {"success": False, "error": "不允许停止该容器"}
     try:
         client = get_client()
-        c = client.containers.get(container_name)
+        c = _find_container(client, container_name)
         c.stop(timeout=timeout)
         return {"success": True, "message": f"容器 '{container_name}' 已停止"}
     except NotFound:
@@ -155,7 +203,7 @@ def start_container(container_name: str) -> dict:
         return {"success": False, "error": f"不允许启动容器 '{container_name}'"}
     try:
         client = get_client()
-        c = client.containers.get(container_name)
+        c = _find_container(client, container_name)
         c.start()
         return {"success": True, "message": f"容器 '{container_name}' 已启动"}
     except NotFound:
@@ -220,7 +268,7 @@ def collect_container_runtime_data(container_name: str, tail: int = 200) -> dict
 
     try:
         client = get_client()
-        c = client.containers.get(container_name)
+        c = _find_container(client, container_name)
     except NotFound:
         return {"success": False, "error": f"容器 '{container_name}' 不存在"}
     except Exception as e:

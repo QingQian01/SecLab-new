@@ -37,6 +37,15 @@ def _iso(value: Any) -> Optional[str]:
     return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
+def _to_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class TeacherAnalysisRepository:
     def __init__(
         self,
@@ -443,6 +452,44 @@ def require_teaching_class_owner(teaching_class_id: int, teacher_id: int) -> dic
                 {"class_id": teaching_class_id},
             )
             row = cursor.fetchone()
+            # admin 账号跳过所有权检查，可以访问所有教学班
+            cursor.execute(
+                f"""
+                SELECT COALESCE(is_admin, 0) AS is_admin
+                FROM `{USER_SERVICE_SCHEMA}`.`user`
+                WHERE user_id = %(teacher_id)s
+                LIMIT 1
+                """,
+                {"teacher_id": teacher_id},
+            )
+            admin_row = cursor.fetchone()
+    is_admin = False
+    if admin_row:
+        val = admin_row.get("is_admin")
+        if isinstance(val, bool):
+            is_admin = val
+        elif isinstance(val, (int, float)):
+            is_admin = val != 0
+        elif isinstance(val, bytes):
+            # TINYINT(1) 可能返回 bytes，b'\x01' 为真，b'\x00' 为假
+            is_admin = any(val)
+        elif isinstance(val, str):
+            is_admin = val.strip().lower() in ("1", "true", "yes", "t", "y")
+        else:
+            # Decimal 等其他类型，尝试转 int
+            try:
+                is_admin = int(val) != 0
+            except (TypeError, ValueError):
+                is_admin = bool(val)
+    if is_admin:
+        if not row:
+            return {
+                "teaching_class_id": teaching_class_id,
+                "class_name": None,
+                "teacher_id": teacher_id,
+                "status": None,
+            }
+        return row
     if not row:
         raise KeyError(f"teaching class does not exist: {teaching_class_id}")
     if int(row.get("teacher_id") or 0) != int(teacher_id):
@@ -450,11 +497,65 @@ def require_teaching_class_owner(teaching_class_id: int, teacher_id: int) -> dic
     return row
 
 
+def _query_generated_question_summary_by_students(student_ids: set[int]) -> list[dict[str, Any]]:
+    """用 student_ids 回退查询 generated_question 知识点汇总。
+
+    当 teaching_class_student 表中没有教学班关联时（例如回退到 class 表查询
+    行政班学生），用学生 ID 直接查询训练题数据，返回与
+    summarize_generated_questions_for_class 相同的 items 格式。
+    """
+    if not student_ids:
+        return []
+    id_list = sorted(student_ids)
+    placeholders = ",".join(["%s"] * len(id_list))
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    gq.knowledge_point_id,
+                    COALESCE(kp.name, '未标注知识点') AS knowledge_point_name,
+                    COUNT(DISTINCT ts.user_id) AS student_count,
+                    COUNT(DISTINCT gq.generated_question_id) AS generated_question_count,
+                    COUNT(gqa.attempt_id) AS attempted_count,
+                    SUM(CASE WHEN gqa.is_correct = 0 THEN 1 ELSE 0 END) AS incorrect_count,
+                    GROUP_CONCAT(DISTINCT gq.generated_question_id ORDER BY gq.created_at DESC SEPARATOR ',') AS question_ids
+                FROM generated_question gq
+                INNER JOIN training_session ts ON ts.training_session_id = gq.training_session_id
+                LEFT JOIN knowledge_point kp ON kp.knowledge_point_id = gq.knowledge_point_id
+                LEFT JOIN generated_question_attempt gqa ON gqa.generated_question_id = gq.generated_question_id
+                WHERE ts.user_id IN ({placeholders})
+                GROUP BY gq.knowledge_point_id, kp.name
+                ORDER BY incorrect_count DESC, generated_question_count DESC
+                """,
+                id_list,
+            )
+            rows = list(cursor.fetchall() or [])
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        attempted_count = _to_int(row.get("attempted_count"))
+        incorrect_count = _to_int(row.get("incorrect_count"))
+        items.append(
+            {
+                "knowledgePointId": row.get("knowledge_point_id"),
+                "knowledgePointName": row.get("knowledge_point_name"),
+                "studentCount": _to_int(row.get("student_count")),
+                "generatedQuestionCount": _to_int(row.get("generated_question_count")),
+                "attemptedCount": attempted_count,
+                "incorrectCount": incorrect_count,
+                "incorrectRate": round(incorrect_count / attempted_count, 4) if attempted_count else 0.0,
+                "representativeQuestionIds": str(row.get("question_ids") or "").split(",")[:3],
+            }
+        )
+    return items
+
+
 def collect_teaching_class_analysis_evidence(teaching_class_id: int) -> dict[str, Any]:
     from teacher_repository import summarize_generated_questions_for_class
 
     with get_connection() as conn:
         with conn.cursor() as cursor:
+            # 优先从 teaching_class + teaching_class_student 查询
             cursor.execute(
                 f"""
                 SELECT tc.teaching_class_id, tc.class_name,
@@ -468,43 +569,106 @@ def collect_teaching_class_analysis_evidence(teaching_class_id: int) -> dict[str
                 {"class_id": teaching_class_id},
             )
             class_row = cursor.fetchone()
-            if not class_row:
-                raise KeyError(f"teaching class does not exist: {teaching_class_id}")
-            student_count = int(class_row.get("student_count") or 0)
+
+            student_ids: set[int] = set()
+            class_name: Optional[str] = None
+
+            if class_row:
+                class_name = class_row.get("class_name")
+                # 从 teaching_class_student 获取学生 ID
+                cursor.execute(
+                    f"""
+                    SELECT DISTINCT student_id
+                    FROM `{USER_SERVICE_SCHEMA}`.`teaching_class_student`
+                    WHERE teaching_class_id = %(class_id)s
+                    """,
+                    {"class_id": teaching_class_id},
+                )
+                student_ids = {_to_int(row.get("student_id")) for row in cursor.fetchall() or []}
+                student_ids.discard(0)
+            else:
+                # teaching_class 表中不存在，回退到 class 表（学生行政班）
+                # 用 user.class_id 关联查询学生
+                cursor.execute(
+                    f"""
+                    SELECT class_id, class_name
+                    FROM `{USER_SERVICE_SCHEMA}`.`class`
+                    WHERE class_id = %(class_id)s
+                    LIMIT 1
+                    """,
+                    {"class_id": teaching_class_id},
+                )
+                class_row = cursor.fetchone()
+                if not class_row:
+                    raise KeyError(f"teaching class does not exist: {teaching_class_id}")
+                class_name = class_row.get("class_name")
+                # 从 user 表查该班级的学生
+                # 注意：user 表中外键字段名为 class_id_class_id（JPA 默认命名），不是 class_id
+                cursor.execute(
+                    f"""
+                    SELECT user_id
+                    FROM `{USER_SERVICE_SCHEMA}`.`user`
+                    WHERE class_id_class_id = %(class_id)s
+                      AND (is_admin IS NULL OR is_admin = b'0' OR is_admin = 0)
+                      AND COALESCE(is_deleted, 0) = 0
+                    """,
+                    {"class_id": teaching_class_id},
+                )
+                student_ids = {_to_int(row.get("user_id")) for row in cursor.fetchall() or []}
+                student_ids.discard(0)
+
+            student_count = len(student_ids)
             if student_count == 0:
                 raise InsufficientAnalysisDataError("教学班暂无学生，不能进行分析")
 
-            cursor.execute(
-                f"""
-                SELECT c.id AS course_id, c.course_name, tcc.teaching_order
-                FROM `{USER_SERVICE_SCHEMA}`.`teaching_class_course` tcc
-                INNER JOIN `{USER_SERVICE_SCHEMA}`.`course` c ON c.id = tcc.course_id
-                WHERE tcc.teaching_class_id = %(class_id)s
-                ORDER BY tcc.teaching_order
-                """,
-                {"class_id": teaching_class_id},
-            )
-            courses = list(cursor.fetchall() or [])
+            # 查询课程安排：优先 teaching_class_course，回退为空
+            courses: list[dict[str, Any]] = []
+            try:
+                cursor.execute(
+                    f"""
+                    SELECT c.id AS course_id, c.course_name, tcc.teaching_order
+                    FROM `{USER_SERVICE_SCHEMA}`.`teaching_class_course` tcc
+                    INNER JOIN `{USER_SERVICE_SCHEMA}`.`course` c ON c.id = tcc.course_id
+                    WHERE tcc.teaching_class_id = %(class_id)s
+                    ORDER BY tcc.teaching_order
+                    """,
+                    {"class_id": teaching_class_id},
+                )
+                courses = list(cursor.fetchall() or [])
+            except Exception:
+                # teaching_class_course 表不存在时忽略
+                pass
 
-            cursor.execute(
-                f"""
-                SELECT COUNT(*) AS event_count,
-                       SUM(CASE WHEN le.event_type IN ('LAB_START', 'START_LAB') THEN 1 ELSE 0 END) AS lab_start_count,
-                       SUM(CASE WHEN le.event_type IN ('LAB_COMPLETE', 'CHALLENGE_COMPLETE') THEN 1 ELSE 0 END) AS lab_complete_count,
-                       SUM(CASE WHEN le.event_type IN ('HINT_REQUEST', 'AI_INTERACTION') THEN 1 ELSE 0 END) AS hint_count,
-                       SUM(CASE WHEN le.event_type IN ('ERROR_EVENT', 'FLAG_SUBMIT_FAILED') THEN 1 ELSE 0 END) AS failure_count
-                FROM learning_event le
-                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs
-                  ON tcs.student_id = le.user_id
-                WHERE tcs.teaching_class_id = %(class_id)s
-                """,
-                {"class_id": teaching_class_id},
-            )
-            event_stats = cursor.fetchone() or {}
+            # 查询学习事件统计（用 student_ids 过滤）
+            if student_ids:
+                placeholders = ",".join(["%s"] * len(student_ids))
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(*) AS event_count,
+                           SUM(CASE WHEN le.event_type IN ('LAB_START', 'START_LAB') THEN 1 ELSE 0 END) AS lab_start_count,
+                           SUM(CASE WHEN le.event_type IN ('LAB_COMPLETE', 'CHALLENGE_COMPLETE', 'CHALLENGE_COMPLETED') THEN 1 ELSE 0 END) AS lab_complete_count,
+                           SUM(CASE WHEN le.event_type IN ('HINT_REQUEST', 'AI_INTERACTION') THEN 1 ELSE 0 END) AS hint_count,
+                           SUM(CASE WHEN le.event_type IN ('ERROR_EVENT', 'FLAG_SUBMIT_FAILED') THEN 1 ELSE 0 END) AS failure_count
+                    FROM learning_event le
+                    WHERE le.user_id IN ({placeholders})
+                    """,
+                    list(student_ids),
+                )
+                event_stats = cursor.fetchone() or {}
+            else:
+                event_stats = {}
 
     question_summary = summarize_generated_questions_for_class(teaching_class_id)
     summary_items = question_summary.get("items") or []
     generated_count = sum(int(item.get("generatedQuestionCount") or 0) for item in summary_items)
+
+    # 当 teaching_class_student 表中没有该教学班的学生关联时（例如回退到 class 表
+    # 查询行政班学生），summarize_generated_questions_for_class 会返回空结果。
+    # 此时用已查到的 student_ids 回退查询 generated_question 数据。
+    if not summary_items and student_ids:
+        summary_items = _query_generated_question_summary_by_students(student_ids)
+        generated_count = sum(int(item.get("generatedQuestionCount") or 0) for item in summary_items)
+
     event_count = int(event_stats.get("event_count") or 0)
     if generated_count == 0 and event_count == 0:
         raise InsufficientAnalysisDataError("教学班暂无学习或训练记录，不能进行分析")
@@ -518,7 +682,7 @@ def collect_teaching_class_analysis_evidence(teaching_class_id: int) -> dict[str
     )
     return {
         "teachingClassId": teaching_class_id,
-        "className": class_row.get("class_name"),
+        "className": class_name,
         "studentCount": student_count,
         "courses": courses,
         "eventStats": {

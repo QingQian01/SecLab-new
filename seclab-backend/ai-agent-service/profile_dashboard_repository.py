@@ -23,6 +23,7 @@ DEFAULT_DASHBOARD = {
     "userStats": {
         "completedCourses": 0,
         "totalScore": 0,
+        "completedExperiments": 0,
         "ranking": 0,
         "activeStreak": 0,
     },
@@ -231,6 +232,19 @@ def _completed_courses(cursor, user_id: int) -> int:
         {"user_id": user_id},
     )
     return _to_int(row.get("total"))
+
+
+def _completed_experiments(profile: dict[str, Any]) -> int:
+    """已完成实验数量：优先取最新画像快照 raw_stats.completed_lab_count，缺失时回退到 lab_session 统计。"""
+    try:
+        summary = json.loads(profile.get("profile_summary_json") or "{}")
+        raw_stats = summary.get("raw_stats") or {}
+        completed = _to_int(raw_stats.get("completed_lab_count"))
+        if completed > 0:
+            return completed
+    except (TypeError, ValueError):
+        pass
+    return 0
 
 
 def _total_score(cursor, user_id: int) -> int:
@@ -502,6 +516,7 @@ def get_profile_dashboard(user_id: int) -> dict[str, Any]:
             user_stats = {
                 "completedCourses": _completed_courses(cursor, user_id),
                 "totalScore": _total_score(cursor, user_id),
+                "completedExperiments": _completed_experiments(profile or {}),
                 "ranking": _ranking_from_class_metrics(cursor, class_id, user_id),
                 "activeStreak": _active_streak(cursor, user_id),
             }

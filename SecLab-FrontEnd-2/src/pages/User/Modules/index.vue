@@ -28,6 +28,46 @@ const modules = ref<ModuleOverViewType[]>([
     score: calculateScore(3, '2-3小时') // 65分：难度3×15 + 3小时×5
   },
   {
+    id: 15,
+    name: '栈溢出实验',
+    description: '从零理解并实践栈溢出：编写含后门的漏洞程序，用 pwndbg 定位溢出点，再用 pwntools 编写 exp 劫持返回地址，拿到 shell 并读取 flag。',
+    difficulty: 3,
+    type: '二进制安全',
+    status: 'available',
+    estimatedTime: '3-4小时',
+    score: calculateScore(3, '3-4小时')
+  },
+  {
+    id: 16,
+    name: '协议分析实验',
+    description: '使用 Wireshark 抓取并解析 HTTP、TCP、UDP 等常见协议，理解报文结构、三次握手与四次挥手，通过抓包分析明文传输风险并获取 flag。',
+    difficulty: 3,
+    type: '网络安全',
+    status: 'available',
+    estimatedTime: '3-4小时',
+    score: calculateScore(3, '3-4小时')
+  },
+  {
+    id: 17,
+    name: '堆溢出实验',
+    description: '深入 glibc 堆管理机制，理解 chunk 结构与 fastbin/smallbin 组织，掌握 unlink 与 fastbin attack 两大经典手法，编写 exp 完成任意地址写与控制流劫持。',
+    difficulty: 5,
+    type: '二进制安全',
+    status: 'available',
+    estimatedTime: '4-5小时',
+    score: calculateScore(5, '4-5小时')
+  },
+  {
+    id: 18,
+    name: '格式化字符串实验',
+    description: '理解 printf 变参机制与格式化字符串漏洞成因，用 %x/%p 泄露栈数据、%s 读取任意地址、%n 任意地址写入，结合 GOT 劫持拿 shell 读 flag。',
+    difficulty: 4,
+    type: '二进制安全',
+    status: 'available',
+    estimatedTime: '3-4小时',
+    score: calculateScore(4, '3-4小时')
+  },
+  {
     id: 2,
     name: 'XSS跨站脚本攻击实验',
     description: '学习XSS跨站脚本攻击的原理、分类和防御方法，包括反射型、存储型和DOM型XSS。',
@@ -353,7 +393,7 @@ const stats = computed(() => ({
     
     <!-- 实验列表 -->
     <div v-if="filteredModules.length" 
-         class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+         class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-fade-in">
       <ModuleOverView
         v-for="module in filteredModules"
         :key="module.id"

@@ -526,6 +526,14 @@ const classRankText = computed(() => {
   return ranking > 0 ? `#${ranking}` : '--'
 })
 
+// 综合得分：优先展示画像快照的整体分（保留一位小数，如 84.2），否则用面板综合分
+const displayComprehensiveScore = computed(() => {
+  const latestScore = Number(latestProfile.value?.overall_score)
+  if (Number.isFinite(latestScore) && latestScore > 0) return latestScore.toFixed(1)
+  const dashboardScore = Number(learningProfile.value.comprehensiveScore || 0)
+  return dashboardScore > 0 ? dashboardScore.toFixed(1) : '0.0'
+})
+
 const strongestSkill = computed(() => {
   const [first] = [...learningProfile.value.skills].sort((a, b) => b.score - a.score)
   return first || { name: '学习投入', score: 0, color: 'text-success' }
@@ -1868,7 +1876,7 @@ onBeforeUnmount(() => {
                     <i class="fas fa-users text-primary"></i>
                     <span class="font-medium">{{ displayProfile.className }}</span>
                   </div>
-                  <div class="flex items-center gap-2 bg-base-200/60 px-3 py-2 rounded-lg">
+                  <div v-if="profileMajor" class="flex items-center gap-2 bg-base-200/60 px-3 py-2 rounded-lg">
                     <i class="fas fa-user-shield text-primary"></i>
                     <span class="font-medium">{{ displayProfile.major }}</span>
                   </div>
@@ -1880,7 +1888,7 @@ onBeforeUnmount(() => {
                     <i class="fas fa-phone text-primary"></i>
                     <span class="font-medium">{{ displayProfile.phone }}</span>
                   </div>
-                  <div class="flex items-center gap-2 bg-base-200/60 px-3 py-2 rounded-lg">
+                  <div v-if="learningHours > 0" class="flex items-center gap-2 bg-base-200/60 px-3 py-2 rounded-lg">
                     <i class="fas fa-clock text-primary"></i>
                     <span class="font-medium">{{ learningHours }}小时</span>
                   </div>
@@ -1894,14 +1902,14 @@ onBeforeUnmount(() => {
                   <i class="fas fa-star text-3xl"></i>
                 </div>
                 <div class="stat-title">综合得分</div>
-                <div class="stat-value text-primary">{{ userStats.totalScore }}</div>
+                <div class="stat-value text-primary">{{ displayComprehensiveScore }}</div>
               </div>
               <div class="stat bg-base-200/50 rounded-box p-4">
                 <div class="stat-figure text-secondary">
                   <i class="fas fa-flask text-3xl"></i>
                 </div>
                 <div class="stat-title">完成实验</div>
-                <div class="stat-value text-secondary">{{ completedExperiments }}</div>
+                <div class="stat-value text-secondary">{{ userStats.completedExperiments ?? 0 }}</div>
               </div>
               <div class="stat bg-base-200/50 rounded-box p-4">
                 <div class="stat-figure text-accent">
@@ -1974,9 +1982,9 @@ onBeforeUnmount(() => {
             <div class="flex flex-col items-center justify-center p-6 bg-base-200/50 rounded-box">
               <div
                 class="radial-progress text-primary mb-6 bg-base-100 border-4 border-base-200"
-                :style="`--value:${learningProfile.comprehensiveScore}; --size:9rem; --thickness: 0.8rem;`"
+                :style="`--value:${Number(displayComprehensiveScore) || 0}; --size:9rem; --thickness: 0.8rem;`"
               >
-                <span class="text-3xl font-bold">{{ learningProfile.comprehensiveScore }}</span>
+                <span class="text-3xl font-bold">{{ displayComprehensiveScore }}</span>
                 <span class="text-sm opacity-70 block -mt-1">综合得分</span>
               </div>
 
@@ -2655,13 +2663,9 @@ onBeforeUnmount(() => {
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-xl font-semibold flex items-center gap-2">
               <i class="fas fa-book-open text-secondary text-2xl"></i>
-              知识点专项训练（后续增强）
+              知识点专项训练
             </h2>
           </div>
-
-          <p class="text-sm text-base-content/80 mb-6 leading-relaxed">
-            这一区域仍来自训练诊断链路，用于后续扩展知识点级专项训练。当前主推荐来源已经统一为上方画像推荐任务。
-          </p>
 
           <div v-if="aiRecommendedTasks.generatedQuestions.length" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 hover:cursor-pointer">
             <div v-for="task in aiRecommendedTasks.generatedQuestions.slice(0, 4)" :key="task.id" class="card bg-base-100 shadow-md border hover:border-secondary transition-all hover:-translate-y-1">

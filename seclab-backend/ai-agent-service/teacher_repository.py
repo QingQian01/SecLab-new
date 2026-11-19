@@ -11,6 +11,8 @@ from training_repository import ensure_training_schema
 
 
 USER_SERVICE_SCHEMA = "userservice"
+# 默认优先展示的班级（计科232班），教师端班级列表排序时置顶
+DEFAULT_PINNED_CLASS_ID = 6
 CLASS_NAME_ALIASES = {
     "Cyber Security 231": "网络安全231班",
     "Cyber Security 232": "网络安全232班",
@@ -96,6 +98,29 @@ def _to_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _to_bool(value: Any) -> bool:
+    """安全解析 MySQL TINYINT(1) 布尔值。
+
+    pymysql 对 TINYINT(1) 可能返回 bytes（如 b'\\x01'）或 Decimal（COALESCE 后），
+    直接 int() 会抛 ValueError，需要按类型分别处理。
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, bytes):
+        return any(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "t", "y")
+    # Decimal 等其他数值类型
+    try:
+        return int(value) != 0
+    except (TypeError, ValueError):
+        return bool(value)
 
 
 def _iso(value: Any) -> Optional[str]:
@@ -216,10 +241,42 @@ def require_owned_teaching_class(teacher_id: int, teaching_class_id: int) -> dic
                 {"teaching_class_id": teaching_class_id},
             )
             row = cursor.fetchone()
-    if not row:
-        raise KeyError(f"teaching class does not exist: {teaching_class_id}")
-    if int(row.get("teacher_id") or 0) != int(teacher_id):
-        raise PermissionError("teaching class is outside current teacher scope")
+            if not row:
+                # 教学班在 teaching_class 表中不存在时，检查是否为 admin 账号
+                # admin 可以访问任何班级（包括 class 表中存在但 teaching_class 未登记的）
+                cursor.execute(
+                    f"""
+                    SELECT COALESCE(is_admin, 0) AS is_admin
+                    FROM `{USER_SERVICE_SCHEMA}`.`user`
+                    WHERE user_id = %(teacher_id)s
+                    LIMIT 1
+                    """,
+                    {"teacher_id": teacher_id},
+                )
+                admin_row = cursor.fetchone()
+                if admin_row and _to_bool(admin_row.get("is_admin")):
+                    return {
+                        "teaching_class_id": teaching_class_id,
+                        "teacher_id": teacher_id,
+                        "class_name": None,
+                        "status": None,
+                    }
+                raise KeyError(f"teaching class does not exist: {teaching_class_id}")
+            # admin 账号跳过所有权检查，可以访问所有教学班
+            cursor.execute(
+                f"""
+                SELECT COALESCE(is_admin, 0) AS is_admin
+                FROM `{USER_SERVICE_SCHEMA}`.`user`
+                WHERE user_id = %(teacher_id)s
+                LIMIT 1
+                """,
+                {"teacher_id": teacher_id},
+            )
+            admin_row = cursor.fetchone()
+            if admin_row and _to_bool(admin_row.get("is_admin")):
+                return row
+            if int(row.get("teacher_id") or 0) != int(teacher_id):
+                raise PermissionError("teaching class is outside current teacher scope")
     return row
 
 
@@ -244,6 +301,34 @@ def require_student_in_owned_teaching_class(
             membership = cursor.fetchone()
     if not membership:
         raise PermissionError("student is outside the selected teaching class")
+
+
+def remove_class_student(
+    teacher_id: int,
+    teaching_class_id: int,
+    student_id: int,
+) -> dict[str, Any]:
+    """将学生移出教学班：只删除成员关联，不删除账号和学习记录。"""
+    require_owned_teaching_class(teacher_id, teaching_class_id)
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                DELETE FROM `{USER_SERVICE_SCHEMA}`.`teaching_class_student`
+                WHERE teaching_class_id = %(teaching_class_id)s
+                  AND student_id = %(student_id)s
+                """,
+                {"teaching_class_id": teaching_class_id, "student_id": student_id},
+            )
+            removed = cursor.rowcount
+        conn.commit()
+    if removed == 0:
+        raise KeyError(f"该学生不在此教学班中: {student_id}")
+    return {
+        "teachingClassId": teaching_class_id,
+        "removedStudentId": student_id,
+        "message": "学生已移出教学班，账号和学习记录均已保留",
+    }
 
 
 def _sql_in_condition(column: str, values: Optional[list[int]], params: dict[str, Any], prefix: str) -> str:
@@ -520,6 +605,16 @@ def _student_item(
         "generatedQuestionAttemptCount": _to_int(attempts.get("attempt_count")),
         "averageTrainingScore": _round(attempts.get("average_score")),
         "lastActiveAt": last_active.get(user_id) or _iso(profile.get("computed_at")),
+        # 兼容前端 TeachingClassStudentDto 的字段命名
+        "studentId": user_id,
+        "studentNumber": str((user or {}).get("user_student_number") or user_id),
+        "studentName": _student_name(user, user_id),
+        "administrativeClass": _display_class_name(
+            (user or {}).get("class_name"),
+            _to_int(profile.get("class_id")) if profile.get("class_id") is not None else _to_int((user or {}).get("class_id")),
+        ),
+        "joinedAt": _iso(profile.get("computed_at")) or "",
+        "recentActivityAt": last_active.get(user_id) or _iso(profile.get("computed_at")),
     }
 
 
@@ -761,6 +856,22 @@ def list_teacher_classes(
             profiles = _fetch_latest_profiles(cursor)
             attempt_stats = _fetch_attempt_stats(cursor, user_ids=scoped_user_ids if class_ids is not None else None)
             last_active = _fetch_last_active(cursor, user_ids=scoped_user_ids if class_ids is not None else None)
+            # 查询 teaching_class 表，获取学年学期等教学班信息
+            teaching_class_map = _fetch_teaching_class_info(cursor)
+            # 统计各教学班已安排的课程数量（teaching_class_course）
+            course_count_by_class: dict[int, int] = {}
+            if _table_exists(cursor, USER_SERVICE_SCHEMA, "teaching_class_course"):
+                cursor.execute(
+                    f"""
+                    SELECT teaching_class_id, COUNT(*) AS course_count
+                    FROM `{USER_SERVICE_SCHEMA}`.teaching_class_course
+                    GROUP BY teaching_class_id
+                    """
+                )
+                for row in cursor.fetchall() or []:
+                    course_count_by_class[_to_int(row.get("teaching_class_id"))] = _to_int(
+                        row.get("course_count")
+                    )
 
     by_class = _group_profiles_by_current_class(profiles, users)
 
@@ -781,7 +892,10 @@ def list_teacher_classes(
 
     class_ids = set(classes.keys())
     items = []
-    for class_id in sorted(class_ids):
+    for class_id in sorted(
+        class_ids,
+        key=lambda cid: (0, cid) if cid == DEFAULT_PINNED_CLASS_ID else (1, cid),
+    ):
         class_profiles = by_class.get(class_id, [])
         average_profile = (
             sum(_to_float(row.get("overall_score")) for row in class_profiles) / len(class_profiles)
@@ -789,18 +903,73 @@ def list_teacher_classes(
         )
         training_scores = training_sum_by_class.get(class_id, [])
         class_info = classes.get(class_id, {})
+        # 从 teaching_class 表获取学年学期信息（可能不存在对应记录）
+        tc_info = teaching_class_map.get(class_id, {})
         items.append(
             {
                 "classId": class_id,
+                # 同时返回 teachingClassId，兼容前端 TeachingClassDto 的字段命名
+                "teachingClassId": tc_info.get("teaching_class_id") or class_id,
                 "className": _display_class_name(class_info.get("class_name"), class_id),
+                # 学年学期：优先用 teaching_class 表的数据，否则用默认值
+                "academicYear": tc_info.get("academic_year") or "2026-2027",
+                "semester": tc_info.get("semester") or 1,
+                "teacherId": tc_info.get("teacher_id") or actor_id or 0,
+                "teacherName": tc_info.get("teacher_name"),
+                "startDate": _iso(tc_info.get("start_date")),
+                "endDate": _iso(tc_info.get("end_date")),
+                "status": tc_info.get("status") or "ACTIVE",
                 "studentCount": user_count_by_class.get(class_id, len(class_profiles)),
                 "activeStudentCount": active_count_by_class.get(class_id, 0),
+                "courseCount": course_count_by_class.get(tc_info.get("teaching_class_id") or class_id, 0),
+                "currentCourse": None,
                 "averageProfileScore": round(average_profile, 2),
                 "averageTrainingScore": round(sum(training_scores) / len(training_scores), 2) if training_scores else 0,
                 "lastActiveAt": last_active_by_class.get(class_id) or max((_iso(row.get("computed_at")) or "" for row in class_profiles), default=None),
+                "canManage": True if (current_user and current_user.get("role") == "admin") else (actor_id is not None and int(tc_info.get("teacher_id") or 0) == int(actor_id)),
+                "createdAt": _iso(tc_info.get("created_at")) or "",
+                "updatedAt": _iso(tc_info.get("updated_at")) or "",
             }
         )
     return {"success": True, "teacherId": actor_id, "items": items}
+
+
+def _fetch_teaching_class_info(cursor) -> dict[int, dict[str, Any]]:
+    """查询 teaching_class 表，返回 class_id -> 教学班信息 的映射。
+
+    teaching_class 表的 class_name 可能与 class 表的 class_name 不同，
+    这里通过 teaching_class_id 与 class_id 做关联（数据库中两者通常一致）。
+    """
+    if not _table_exists(cursor, USER_SERVICE_SCHEMA, "teaching_class"):
+        return {}
+    cursor.execute(
+        f"""
+        SELECT tc.teaching_class_id, tc.class_name, tc.academic_year, tc.semester,
+               tc.teacher_id, tc.start_date, tc.end_date, tc.status,
+               tc.created_at, tc.updated_at,
+               u.user_name AS teacher_name
+        FROM `{USER_SERVICE_SCHEMA}`.`teaching_class` tc
+        LEFT JOIN `{USER_SERVICE_SCHEMA}`.`user` u ON u.user_id = tc.teacher_id
+        """
+    )
+    result: dict[int, dict[str, Any]] = {}
+    for row in cursor.fetchall() or []:
+        tc_id = _to_int(row.get("teaching_class_id"))
+        if tc_id:
+            result[tc_id] = {
+                "teaching_class_id": tc_id,
+                "class_name": row.get("class_name"),
+                "academic_year": row.get("academic_year"),
+                "semester": _to_int(row.get("semester")),
+                "teacher_id": _to_int(row.get("teacher_id")),
+                "teacher_name": row.get("teacher_name"),
+                "start_date": row.get("start_date"),
+                "end_date": row.get("end_date"),
+                "status": row.get("status"),
+                "created_at": row.get("created_at"),
+                "updated_at": row.get("updated_at"),
+            }
+    return result
 
 
 def list_class_students(class_id: int, current_user: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -830,6 +999,179 @@ def list_class_students(class_id: int, current_user: Optional[dict[str, Any]] = 
     return {"success": True, "classId": class_id, "items": items}
 
 
+def list_class_courses(class_id: int, current_user: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """返回教学班已配置的课程安排列表。
+
+    前端 TeachingClasses 页面通过 getTeachingClassCourses 调用。
+    数据来自 experiment-module-service 的 teaching_class_course 关联表，
+    若表不存在或暂无数据则返回空列表（避免 404 阻塞页面加载）。
+    """
+    _ensure_teacher_source_schemas()
+    class_ids = _scope_class_ids(current_user)
+    if class_ids is not None and class_id not in class_ids:
+        raise PermissionError("classId is outside current teacher scope")
+
+    items: list[dict[str, Any]] = []
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                # 检查 teaching_class_course 表是否存在（表在 userservice 库）
+                cursor.execute(
+                    """
+                    SELECT TABLE_NAME
+                    FROM information_schema.TABLES
+                    WHERE TABLE_SCHEMA = %(schema)s AND TABLE_NAME = 'teaching_class_course'
+                    """,
+                    {"schema": USER_SERVICE_SCHEMA},
+                )
+                if not cursor.fetchone():
+                    return {"success": True, "classId": class_id, "items": []}
+
+                cursor.execute(
+                    f"""
+                    SELECT tcc.course_id, tcc.teaching_order,
+                           tcc.teaching_content, tcc.planned_start_date,
+                           tcc.planned_end_date, tcc.updated_at,
+                           c.course_name, c.course_description,
+                           c.created_by, u.user_name AS creator_name
+                    FROM `{USER_SERVICE_SCHEMA}`.teaching_class_course tcc
+                    LEFT JOIN `{USER_SERVICE_SCHEMA}`.course c ON c.id = tcc.course_id
+                    LEFT JOIN `{USER_SERVICE_SCHEMA}`.user u ON u.user_id = c.created_by
+                    WHERE tcc.teaching_class_id = %(class_id)s
+                    ORDER BY tcc.teaching_order ASC, tcc.course_id ASC
+                    """,
+                    {"class_id": class_id},
+                )
+                for row in cursor.fetchall() or []:
+                    items.append({
+                        "courseId": _to_int(row.get("course_id")),
+                        "courseName": row.get("course_name") or "",
+                        "courseDescription": row.get("course_description") or "",
+                        "teachingContent": row.get("teaching_content"),
+                        "teachingOrder": _to_int(row.get("teaching_order")) or 0,
+                        "plannedStartDate": _iso(row.get("planned_start_date")),
+                        "plannedEndDate": _iso(row.get("planned_end_date")),
+                        "createdBy": _to_int(row.get("created_by")),
+                        "creatorName": row.get("creator_name"),
+                        "updatedAt": _iso(row.get("updated_at")) or "",
+                    })
+    except Exception:
+        # 表不存在或查询失败时返回空列表，避免阻塞前端页面加载
+        pass
+
+    return {"success": True, "classId": class_id, "teachingClassId": class_id, "items": items}
+
+
+def replace_teacher_class_courses(
+    class_id: int,
+    items: list[dict[str, Any]],
+    current_user: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """替换教学班的课程安排（全量覆盖）。
+
+    前端 TeachingClasses 页面通过 replaceTeachingClassCourses 调用。
+    先删除该教学班的所有课程关联，再按 items 列表重新插入。
+    """
+    _ensure_teacher_source_schemas()
+    class_ids = _scope_class_ids(current_user)
+    if class_ids is not None and class_id not in class_ids:
+        raise PermissionError("classId is outside current teacher scope")
+
+    with get_connection() as conn:
+        try:
+            with conn.cursor() as cursor:
+                # 检查 teaching_class_course 表是否存在（表在 userservice 库）
+                cursor.execute(
+                    """
+                    SELECT TABLE_NAME
+                    FROM information_schema.TABLES
+                    WHERE TABLE_SCHEMA = %(schema)s AND TABLE_NAME = 'teaching_class_course'
+                    """,
+                    {"schema": USER_SERVICE_SCHEMA},
+                )
+                if not cursor.fetchone():
+                    raise RuntimeError("teaching_class_course 表不存在")
+
+                # 删除现有课程关联
+                cursor.execute(
+                    f"DELETE FROM `{USER_SERVICE_SCHEMA}`.teaching_class_course WHERE teaching_class_id = %(class_id)s",
+                    {"class_id": class_id},
+                )
+
+                # 插入新的课程关联
+                for item in items:
+                    teaching_order = int(item.get("teachingOrder") or 1)
+                    if teaching_order < 1:
+                        teaching_order = 1
+                    cursor.execute(
+                        f"""
+                        INSERT INTO `{USER_SERVICE_SCHEMA}`.teaching_class_course
+                            (teaching_class_id, course_id, teaching_order,
+                             planned_start_date, planned_end_date)
+                        VALUES
+                            (%(class_id)s, %(course_id)s, %(teaching_order)s,
+                             %(planned_start_date)s, %(planned_end_date)s)
+                        """,
+                        {
+                            "class_id": class_id,
+                            "course_id": int(item.get("courseId") or 0),
+                            "teaching_order": teaching_order,
+                            "planned_start_date": item.get("plannedStartDate") or None,
+                            "planned_end_date": item.get("plannedEndDate") or None,
+                        },
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return list_class_courses(class_id, current_user=current_user)
+
+
+def update_teacher_class_course_content(
+    class_id: int,
+    course_id: int,
+    teaching_content: Optional[str],
+    current_user: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """更新教学班某门课程的教学内容。"""
+    _ensure_teacher_source_schemas()
+    class_ids = _scope_class_ids(current_user)
+    if class_ids is not None and class_id not in class_ids:
+        raise PermissionError("classId is outside current teacher scope")
+
+    with get_connection() as conn:
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE teaching_class_course
+                    SET teaching_content = %(teaching_content)s
+                    WHERE teaching_class_id = %(class_id)s AND course_id = %(course_id)s
+                    """,
+                    {
+                        "class_id": class_id,
+                        "course_id": course_id,
+                        "teaching_content": teaching_content,
+                    },
+                )
+                if cursor.rowcount == 0:
+                    raise KeyError(
+                        f"teaching_class_course not found: class_id={class_id}, course_id={course_id}"
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    # 返回更新后的单个课程信息
+    result = list_class_courses(class_id, current_user=current_user)
+    for item in result.get("items") or []:
+        if int(item.get("courseId") or 0) == course_id:
+            return item
+    raise KeyError(f"course not found after update: course_id={course_id}")
+
+
 def get_student_profile_for_teacher(
     user_id: int,
     current_user: Optional[dict[str, Any]] = None,
@@ -841,6 +1183,12 @@ def get_student_profile_for_teacher(
         raise PermissionError("teacher identity is required")
     if teaching_class_id is not None:
         require_student_in_owned_teaching_class(actor_id, teaching_class_id, user_id)
+    # admin（平台管理员）不受单个教师拥有权限制，可查看全部教学班级学生画像
+    is_admin = bool(current_user and str(current_user.get("role") or "").lower() == "admin")
+    teacher_condition = "" if is_admin else "AND tc.teacher_id = %(teacher_id)s"
+    params: dict[str, Any] = {"user_id": user_id}
+    if not is_admin:
+        params["teacher_id"] = actor_id
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -852,11 +1200,11 @@ def get_student_profile_for_teacher(
                 INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class` tc
                   ON tc.teaching_class_id = tcs.teaching_class_id
                 WHERE u.user_id = %(user_id)s
-                  AND tc.teacher_id = %(teacher_id)s
+                  {teacher_condition}
                   AND COALESCE(u.is_deleted, 0) = 0
                 LIMIT 1
                 """,
-                {"user_id": user_id, "teacher_id": actor_id},
+                params,
             )
             student_row = cursor.fetchone()
             if not student_row:
@@ -1022,7 +1370,9 @@ def _generated_question_filters(
     return "\n".join(conditions), params
 
 
-def _generated_question_from_sql(actor_id: int, conditions: str) -> str:
+def _generated_question_from_sql(actor_id: int, conditions: str, is_admin: bool = False) -> str:
+    # admin（平台管理员）不受单个教师拥有权限制，可查看全部教学班级数据
+    teacher_ownership = "" if is_admin else f"AND tc.teacher_id = {int(actor_id)}"
     return f"""
         FROM generated_question gq
         INNER JOIN training_session ts ON ts.training_session_id = gq.training_session_id
@@ -1049,7 +1399,7 @@ def _generated_question_from_sql(actor_id: int, conditions: str) -> str:
           ON typical.generated_question_id = gq.generated_question_id
          AND typical.teacher_id = {int(actor_id)}
         WHERE COALESCE(u.is_deleted, 0) = 0
-          AND tc.teacher_id = {int(actor_id)}
+          {teacher_ownership}
           {conditions}
     """
 
@@ -1096,6 +1446,7 @@ def list_generated_questions_for_teacher(
     actor_id = _current_user_id(current_user, teacher_id)
     if actor_id is None:
         raise PermissionError("teacher identity is required")
+    is_admin = bool(current_user and str(current_user.get("role") or "").lower() == "admin")
     page = max(1, page)
     size = max(1, min(size, 100))
     conditions, params = _generated_question_filters(
@@ -1108,7 +1459,7 @@ def list_generated_questions_for_teacher(
         date_from=date_from,
         date_to=date_to,
     )
-    base_from = _generated_question_from_sql(actor_id, conditions)
+    base_from = _generated_question_from_sql(actor_id, conditions, is_admin=is_admin)
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -1148,6 +1499,7 @@ def get_generated_question_for_teacher(
     actor_id = _current_user_id(current_user)
     if actor_id is None:
         raise PermissionError("teacher identity is required")
+    is_admin = bool(current_user and str(current_user.get("role") or "").lower() == "admin")
     conditions, params = _generated_question_filters(
         teaching_class_id=None,
         course_id=None,
@@ -1162,7 +1514,7 @@ def get_generated_question_for_teacher(
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                f"{_generated_question_select_sql()} {_generated_question_from_sql(actor_id, conditions)} "
+                f"{_generated_question_select_sql()} {_generated_question_from_sql(actor_id, conditions, is_admin=is_admin)} "
                 "ORDER BY tc.updated_at DESC LIMIT 1",
                 params,
             )
@@ -1215,28 +1567,78 @@ def summarize_generated_questions_for_class(
         require_owned_teaching_class(actor_id, teaching_class_id)
     with get_connection() as conn:
         with conn.cursor() as cursor:
+            # 优先从 teaching_class_student 获取学生（教学班有成员时）
             cursor.execute(
                 f"""
-                SELECT
-                    gq.knowledge_point_id,
-                    COALESCE(kp.name, '未标注知识点') AS knowledge_point_name,
-                    COUNT(DISTINCT ts.user_id) AS student_count,
-                    COUNT(DISTINCT gq.generated_question_id) AS generated_question_count,
-                    COUNT(gqa.attempt_id) AS attempted_count,
-                    SUM(CASE WHEN gqa.is_correct = 0 THEN 1 ELSE 0 END) AS incorrect_count,
-                    GROUP_CONCAT(DISTINCT gq.generated_question_id ORDER BY gq.created_at DESC SEPARATOR ',') AS question_ids
-                FROM generated_question gq
-                INNER JOIN training_session ts ON ts.training_session_id = gq.training_session_id
-                INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs ON tcs.student_id = ts.user_id
-                LEFT JOIN knowledge_point kp ON kp.knowledge_point_id = gq.knowledge_point_id
-                LEFT JOIN generated_question_attempt gqa ON gqa.generated_question_id = gq.generated_question_id
-                WHERE tcs.teaching_class_id = %(teaching_class_id)s
-                GROUP BY gq.knowledge_point_id, kp.name
-                ORDER BY incorrect_count DESC, generated_question_count DESC
+                SELECT COUNT(*) AS cnt
+                FROM `{USER_SERVICE_SCHEMA}`.`teaching_class_student`
+                WHERE teaching_class_id = %(teaching_class_id)s
                 """,
                 {"teaching_class_id": teaching_class_id},
             )
-            rows = list(cursor.fetchall() or [])
+            has_members = _to_int((cursor.fetchone() or {}).get("cnt")) > 0
+            if has_members:
+                cursor.execute(
+                    f"""
+                    SELECT
+                        gq.knowledge_point_id,
+                        COALESCE(kp.name, '未标注知识点') AS knowledge_point_name,
+                        COUNT(DISTINCT ts.user_id) AS student_count,
+                        COUNT(DISTINCT gq.generated_question_id) AS generated_question_count,
+                        COUNT(gqa.attempt_id) AS attempted_count,
+                        SUM(CASE WHEN gqa.is_correct = 0 THEN 1 ELSE 0 END) AS incorrect_count,
+                        GROUP_CONCAT(DISTINCT gq.generated_question_id ORDER BY gq.created_at DESC SEPARATOR ',') AS question_ids
+                    FROM generated_question gq
+                    INNER JOIN training_session ts ON ts.training_session_id = gq.training_session_id
+                    INNER JOIN `{USER_SERVICE_SCHEMA}`.`teaching_class_student` tcs ON tcs.student_id = ts.user_id
+                    LEFT JOIN knowledge_point kp ON kp.knowledge_point_id = gq.knowledge_point_id
+                    LEFT JOIN generated_question_attempt gqa ON gqa.generated_question_id = gq.generated_question_id
+                    WHERE tcs.teaching_class_id = %(teaching_class_id)s
+                    GROUP BY gq.knowledge_point_id, kp.name
+                    ORDER BY incorrect_count DESC, generated_question_count DESC
+                    """,
+                    {"teaching_class_id": teaching_class_id},
+                )
+                rows = list(cursor.fetchall() or [])
+            else:
+                # 教学班无成员记录时，回退到 class 表按 user.class_id_class_id 查询学生
+                cursor.execute(
+                    f"""
+                    SELECT user_id
+                    FROM `{USER_SERVICE_SCHEMA}`.`user`
+                    WHERE class_id_class_id = %(teaching_class_id)s
+                      AND (is_admin IS NULL OR is_admin = b'0' OR is_admin = 0)
+                      AND COALESCE(is_deleted, 0) = 0
+                    """,
+                    {"teaching_class_id": teaching_class_id},
+                )
+                student_ids = {_to_int(row.get("user_id")) for row in cursor.fetchall() or []}
+                student_ids.discard(0)
+                if not student_ids:
+                    return {"teachingClassId": teaching_class_id, "items": []}
+                id_list = sorted(student_ids)
+                placeholders = ",".join(["%s"] * len(id_list))
+                cursor.execute(
+                    f"""
+                    SELECT
+                        gq.knowledge_point_id,
+                        COALESCE(kp.name, '未标注知识点') AS knowledge_point_name,
+                        COUNT(DISTINCT ts.user_id) AS student_count,
+                        COUNT(DISTINCT gq.generated_question_id) AS generated_question_count,
+                        COUNT(gqa.attempt_id) AS attempted_count,
+                        SUM(CASE WHEN gqa.is_correct = 0 THEN 1 ELSE 0 END) AS incorrect_count,
+                        GROUP_CONCAT(DISTINCT gq.generated_question_id ORDER BY gq.created_at DESC SEPARATOR ',') AS question_ids
+                    FROM generated_question gq
+                    INNER JOIN training_session ts ON ts.training_session_id = gq.training_session_id
+                    LEFT JOIN knowledge_point kp ON kp.knowledge_point_id = gq.knowledge_point_id
+                    LEFT JOIN generated_question_attempt gqa ON gqa.generated_question_id = gq.generated_question_id
+                    WHERE ts.user_id IN ({placeholders})
+                    GROUP BY gq.knowledge_point_id, kp.name
+                    ORDER BY incorrect_count DESC, generated_question_count DESC
+                    """,
+                    id_list,
+                )
+                rows = list(cursor.fetchall() or [])
     items = []
     for row in rows:
         attempted_count = _to_int(row.get("attempted_count"))

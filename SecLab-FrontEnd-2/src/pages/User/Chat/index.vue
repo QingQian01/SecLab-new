@@ -88,11 +88,8 @@
                   class="chat chat-end"
                 >
                   <div class="chat-image avatar">
-                    <div class="w-8 sm:w-10 rounded-full ring ring-primary ring-offset-base-100 ring-offset-2">
-                      <img 
-                        src="https://api.dicebear.com/7.x/avataaars/svg?seed=user"
-                        alt="用户"
-                      />
+                    <div class="w-8 sm:w-10 rounded-full ring ring-primary ring-offset-base-100 ring-offset-2 bg-primary text-primary-content flex items-center justify-center">
+                      <i class="fas fa-user text-sm sm:text-base"></i>
                     </div>
                   </div>
                   <div class="chat-bubble chat-bubble-primary">
@@ -232,8 +229,25 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
-import OpenAI from 'openai'
 import MarkdownRenderer from '../../../components/MarkdownRenderer.vue'
+
+// Agent 服务地址（生产环境用相对路径由 nginx 代理，开发环境用 localhost）
+const AGENT_BASE_URL = import.meta.env.VITE_AGENT_BASE_URL ??
+    (import.meta.env.DEV ? 'http://localhost:8010' : '')
+
+// Dify SSE 事件类型
+interface DifyChunk {
+  event: string
+  conversation_id?: string
+  answer?: string
+  message_id?: string
+  id?: string
+  thought?: string
+  observation?: string
+  tool?: string
+  tool_input?: string
+  message?: string
+}
 
 interface Message {
   role: 'user' | 'assistant'
@@ -245,19 +259,16 @@ interface Message {
   showThinking?: boolean  // 添加标记，指示这条消息是否要显示思考过程
 }
 
-// OpenAI客户端实例
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY || '', // 从环境变量获取API密钥
-  dangerouslyAllowBrowser: true, // 允许在浏览器中使用（仅开发环境）
-  baseURL:import.meta.env.VITE_BASE_URL || ''
-})
+// 会话 ID（保持多轮对话上下文，由 Dify 返回）
+const conversationId = ref<string>('')
 
 const messages = ref<Message[]>([])
 const inputMessage = ref('')
 const isLoading = ref(false)
 const chatContainer = ref<HTMLElement | null>(null)
 const inputField = ref<HTMLTextAreaElement | null>(null)
-const enableThinking = ref(false)
+// Chat 页面默认显示思考过程（与 FloatingChat 不显示思考过程的行为区分）
+const enableThinking = ref(true)
 const showThinking = ref(false)
 
 // 添加平台相关的背景信息
@@ -390,14 +401,9 @@ const clearInput = () => {
   inputField.value?.focus()
 }
 
-// 切换主题
-const toggleTheme = () => {
-  const html = document.querySelector('html')
-  if (html) {
-    const currentTheme = html.getAttribute('data-theme')
-    html.setAttribute('data-theme', currentTheme === 'night' ? 'light' : 'night')
-  }
-}
+// 切换主题（使用全局 useTheme，确保与 Header 切换同步、持久化到 localStorage）
+import { useTheme } from '../../../composables/useTheme'
+const { toggleTheme } = useTheme()
 
 // 切换到悬浮窗模式
 const switchToFloatingMode = () => {
@@ -563,91 +569,155 @@ ${platformInfo.learningPath}
 - 根据问题自然地引用相关实验模块，鼓励用户尝试相关实验`
 }
 
-// 调用OpenAI API
-const callOpenAI = async (userQuestion: string, messageIndex: number) => {
-  if (!openai.apiKey) {
-    messages.value[messageIndex].content = '错误：未配置API密钥，请联系管理员设置VITE_OPENAI_API_KEY环境变量。'
-    return
-  }
-
+// 调用 Dify Agent（SSE 流式）—— 与 FloatingChat 一致，统一走后端 ai-agent-service
+const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
   messages.value[messageIndex].isStreaming = true
   messages.value[messageIndex].streamContent = ''
-  
-  // 初始化思考过程流内容并记录消息的思考显示状态
+  // Dify Agent 返回的 ILD...twenty-five 思考块按开关决定是否展示
   messages.value[messageIndex].showThinking = enableThinking.value
-  if (enableThinking.value) {
-    messages.value[messageIndex].thinking = ''
-  }
-  
+  messages.value[messageIndex].thinking = ''
+
+  let completeResponse = ''
+  let completeThinking = ''
+  // Dify Agent 的 answer 里可能包含 <think>...</think> 思考过程标签，
+  // 需要流式分离思考过程与最终回答。
+  let inThinkBlock = false
+
   try {
-    // 构建消息历史
-    const messageHistory = messages.value
-      .slice(0, messageIndex)
-      .map(msg => {
-        if (msg.role === 'user') {
-          // 向用户消息添加平台相关上下文
-          return {
-            role: msg.role,
-            content: isPlatformRelatedQuestion(msg.content) ? enhanceUserQuestion(msg.content) : msg.content
-          }
-        }
-        return {
-          role: msg.role,
-          content: msg.content
-        }
+    const response = await fetch(`${AGENT_BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: userQuestion,
+        conversation_id: conversationId.value,
+        user: 'student',
+        inputs: {},
+        container_name: null,
+        log_tail: 0
       })
-    
-    // 添加增强的系统消息
-    messageHistory.unshift({
-      role: 'system',
-      content: getSystemPrompt()
-    } as any)
+    })
 
-    // 构建请求参数
-    const requestParams: any = {
-      model: enableThinking.value ? 'deepseek-reasoner' : 'deepseek-chat',
-      messages: messageHistory,
-      temperature: 0.7,
-      stream: true,
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`)
     }
-    
-    // 使用OpenAI SDK的流式API
-    const stream = await openai.chat.completions.create(requestParams)
 
-    let completeResponse = ''
-    let completeThinking = ''
-    
-    // 处理流式响应
-    for await (const chunk of stream) {
-      // 处理普通内容
-      const content = chunk.choices[0]?.delta?.content || ''
-      if (content) {
-        completeResponse += content
-        messages.value[messageIndex].streamContent = completeResponse
-        // 在每次更新内容后都滚动到底部
-        nextTick(() => {
-          scrollToBottom()
-        })
-      }
-      
-      // 处理思考过程
-      if (enableThinking.value) {
-        const reasoningContent = chunk.choices[0]?.delta?.reasoning_content || ''
-        if (reasoningContent) {
-          completeThinking += reasoningContent
-          messages.value[messageIndex].thinking = completeThinking
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''  // 保留不完整行
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data:')) continue
+
+        const raw = trimmed.slice(5).trim()
+        if (!raw || raw === '[DONE]') continue
+
+        try {
+          const chunk = JSON.parse(raw) as DifyChunk
+
+          // 保存 conversation_id 用于多轮对话
+          if (chunk.conversation_id) {
+            conversationId.value = chunk.conversation_id
+          }
+
+          // 流式回答文本片段（分离 <think> 思考过程）
+          if (chunk.event === 'agent_message' || chunk.event === 'message') {
+            let delta = chunk.answer ?? ''
+            if (delta) {
+              // 流式解析 <think>...</think> 标签：标签可能跨多个分片
+              while (delta) {
+                if (inThinkBlock) {
+                  // 在 think 块内，寻找 </think> 结束标记
+                  const endIdx = delta.indexOf('</think>')
+                  if (endIdx >= 0) {
+                    inThinkBlock = false
+                    completeThinking += delta.substring(0, endIdx)
+                    delta = delta.substring(endIdx + 8)
+                  } else {
+                    // 整个分片都在 think 块内
+                    completeThinking += delta
+                    delta = ''
+                  }
+                }
+                if (!inThinkBlock && delta) {
+                  const startIdx = delta.indexOf('<think>')
+                  if (startIdx >= 0) {
+                    const endIdx = delta.indexOf('</think>', startIdx)
+                    if (endIdx >= 0) {
+                      // 同一分片内闭合
+                      completeThinking += delta.substring(startIdx + 7, endIdx)
+                      delta = delta.substring(0, startIdx) + delta.substring(endIdx + 8)
+                    } else {
+                      // think 块开始但未闭合
+                      inThinkBlock = true
+                      completeThinking += delta.substring(startIdx + 7)
+                      delta = delta.substring(0, startIdx)
+                    }
+                  } else {
+                    break  // 没有 think 标签，正常处理
+                  }
+                }
+              }
+              if (delta) {
+                completeResponse += delta
+                messages.value[messageIndex].streamContent = completeResponse
+                nextTick(() => scrollToBottom())
+              }
+              // 同步更新思考过程（仅在开启深度思考时显示）
+              if (enableThinking.value && completeThinking) {
+                messages.value[messageIndex].thinking = completeThinking
+                nextTick(() => scrollToBottom())
+              }
+            }
+          }
+
+          // 消息结束
+          if (chunk.event === 'message_end') {
+            // 兜底：Dify Agent 有时会把整个回答包在 <think>...</think> 标签里
+            // （即思考块包裹了实际回答，completeResponse 为空但 completeThinking 有内容）。
+            // 此时把 thinking 内容作为实际回复，并清空 thinking 字段，
+            // 避免用户看到"（无回复）"和重复显示。
+            if (!completeResponse && completeThinking) {
+              completeResponse = completeThinking
+              completeThinking = ''
+              messages.value[messageIndex].thinking = ''
+            }
+            messages.value[messageIndex].content = completeResponse || '（无回复）'
+            messages.value[messageIndex].isStreaming = false
+          }
+
+          // 错误事件
+          if (chunk.event === 'error') {
+            throw new Error(chunk.message || '未知错误')
+          }
+        } catch (_) {
+          // JSON 解析失败时跳过该行
         }
       }
     }
-    
-    // 更新最终完整回答
-    messages.value[messageIndex].content = completeResponse
-    messages.value[messageIndex].isStreaming = false
-    
-    
+
+    // 兜底：流结束但未收到 message_end
+    if (messages.value[messageIndex].isStreaming) {
+      if (!completeResponse && completeThinking) {
+        completeResponse = completeThinking
+        completeThinking = ''
+        messages.value[messageIndex].thinking = ''
+      }
+      messages.value[messageIndex].content = completeResponse || '（无回复）'
+      messages.value[messageIndex].isStreaming = false
+    }
+
   } catch (error: any) {
     messages.value[messageIndex].streamContent = ''
-    messages.value[messageIndex].content = `调用API时出错: ${error.message || '未知错误'}`
+    messages.value[messageIndex].content = `连接 Agent 服务失败：${error.message || '未知错误'}`
     messages.value[messageIndex].isStreaming = false
   }
 }
@@ -685,8 +755,8 @@ const handleSendMessage = () => {
   setTimeout(scrollToBottom, 100)
   setTimeout(scrollToBottom, 300)
   
-  // 调用OpenAI API - 传入原始问题，增强会在API调用中进行
-  callOpenAI(userQuestion, responseIndex)
+  // 调用 Dify Agent - 传入原始问题，由后端 ai-agent-service 处理上下文增强
+  callDifyAgent(userQuestion, responseIndex)
     .finally(() => {
       isLoading.value = false
       // 回答完成后再次滚动到底部
@@ -796,6 +866,14 @@ onMounted(() => {
 .collapse .collapse-title {
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
+}
+
+/* 修复 DaisyUI collapse 展开时 collapse-content 默认 position:absolute 导致
+   思考面板覆盖在回答内容上方的问题。改为 relative 让它占据文档流空间，
+   把下方的回答内容自然推下去。 */
+.collapse.open .collapse-content,
+.collapse > input:checked ~ .collapse-content {
+  position: relative;
 }
 
 /* 确保聊天区域和输入区域没有重叠 */

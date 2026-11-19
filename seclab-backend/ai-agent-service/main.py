@@ -14,8 +14,9 @@ import os
 import re
 import time
 import httpx
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Security, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Security, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security.api_key import APIKeyHeader
@@ -84,12 +85,16 @@ from teacher_repository import (
     get_generated_question_for_teacher,
     get_student_profile_for_teacher,
     list_class_students as repo_list_teacher_class_students,
+    list_class_courses as repo_list_teacher_class_courses,
     list_generated_questions_for_teacher,
     list_teacher_classes,
     mark_generated_question_typical,
     read_teacher_dashboard,
+    remove_class_student as repo_remove_teacher_class_student,
+    replace_teacher_class_courses as repo_replace_teacher_class_courses,
     summarize_generated_questions_for_class,
     unmark_generated_question_typical,
+    update_teacher_class_course_content as repo_update_teacher_class_course_content,
 )
 from teacher_profile_service import rebuild_teaching_class_profiles
 from teacher_course_analysis_service import (
@@ -685,6 +690,30 @@ def _base64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode((value + padding).encode("utf-8"))
 
 
+def _to_bool(value: Any) -> bool:
+    """安全解析 MySQL TINYINT(1) 布尔值。
+
+    pymysql 在某些配置下对 TINYINT(1) 返回 bytes（如 b'\\x01'）或 Decimal（COALESCE 后），
+    直接 int() 会抛 ValueError，需要按类型分别处理。
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, bytes):
+        # b'\x01' -> 1, b'\x00' -> 0
+        return any(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "t", "y")
+    # Decimal 等其他数值类型
+    try:
+        return int(value) != 0
+    except (TypeError, ValueError):
+        return bool(value)
+
+
 def _extract_bearer_token(authorization: Optional[str]) -> str:
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header is required")
@@ -727,7 +756,8 @@ def _load_teacher_auth_context(user_id: int) -> dict[str, Any]:
                     u.user_student_number,
                     u.user_name,
                     COALESCE(u.is_deleted, 0) AS is_deleted,
-                    u.user_role
+                    u.user_role,
+                    COALESCE(u.is_admin, 0) AS is_admin
                 FROM `userservice`.`user` u
                 WHERE u.user_id = %(user_id)s
                 LIMIT 1
@@ -737,7 +767,8 @@ def _load_teacher_auth_context(user_id: int) -> dict[str, Any]:
             user = cursor.fetchone()
             if not user:
                 raise HTTPException(status_code=401, detail="Token user does not exist")
-            if int(user.get("is_deleted") or 0) == 1:
+            # pymysql 对 TINYINT(1) 可能返回 bytes（b'\x01'），需要安全解析
+            if _to_bool(user.get("is_deleted")):
                 raise HTTPException(status_code=403, detail="This account is disabled")
 
             cursor.execute(
@@ -757,13 +788,15 @@ def _load_teacher_auth_context(user_id: int) -> dict[str, Any]:
     if str(user.get("user_role") or "").upper() != "TEACHER":
         raise HTTPException(status_code=403, detail="Only teacher accounts can access this endpoint")
 
+    # is_admin=1 的教师账号（如 admin）可以查看所有班级数据
+    is_admin = _to_bool(user.get("is_admin"))
     return {
         "user_id": int(user["user_id"]),
         "student_number": user.get("user_student_number"),
         "name": user.get("user_name"),
-        "role": "teacher",
-        # Legacy administrative-class endpoints must not fall back to global access.
-        "scope_class_ids": [],
+        "role": "admin" if is_admin else "teacher",
+        # admin 不限制班级范围；普通教师只能访问自己负责的班级
+        "scope_class_ids": None if is_admin else owned_teaching_class_ids,
         "owned_teaching_class_ids": owned_teaching_class_ids,
     }
 
@@ -1874,6 +1907,7 @@ async def student_start_teacher_assignment(
 
 @app.get("/api/teacher/classes")
 @app.get("/api/teacher/dashboard/classes")
+@app.get("/api/teacher/teaching-classes")
 async def teacher_classes(
     teacherId: Optional[int] = Query(default=None),
     current_user: dict[str, Any] = Depends(require_teacher_user),
@@ -1886,12 +1920,85 @@ async def teacher_classes(
 
 @app.get("/api/teacher/classes/{class_id}/students")
 @app.get("/api/teacher/dashboard/classes/{class_id}/students")
+@app.get("/api/teacher/teaching-classes/{class_id}/students")
 async def teacher_class_students(
     class_id: int,
     current_user: dict[str, Any] = Depends(require_teacher_user),
 ):
     try:
         return repo_list_teacher_class_students(class_id, current_user=current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.delete("/api/teacher/teaching-classes/{class_id}/students/{student_id}")
+async def teacher_class_remove_student(
+    class_id: int,
+    student_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    """将学生移出教学班：只删除成员关联，不删除账号和学习记录。"""
+    try:
+        teacher_id = int(current_user.get("user_id") or 0)
+        return repo_remove_teacher_class_student(teacher_id, class_id, student_id)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.get("/api/teacher/teaching-classes/{class_id}/courses")
+async def teacher_class_courses(
+    class_id: int,
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    """返回教学班的课程安排列表。
+
+    前端 TeachingClasses 页面通过 getTeachingClassCourses 调用此接口。
+    当前数据来自 experiment-module-service 的 teaching_class_course 关联表，
+    这里直接查询数据库返回已配置的教学安排。
+    """
+    try:
+        return repo_list_teacher_class_courses(class_id, current_user=current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.put("/api/teacher/teaching-classes/{class_id}/courses")
+async def teacher_replace_class_courses(
+    class_id: int,
+    body: dict[str, Any] = Body(...),
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    """替换教学班的课程安排（全量覆盖）。
+
+    前端 TeachingClasses 页面通过 replaceTeachingClassCourses 调用此接口。
+    请求体: {"items": [{"courseId": 1, "teachingOrder": 1, "plannedStartDate": "...", "plannedEndDate": "..."}]}
+    """
+    try:
+        items = body.get("items") or []
+        if not isinstance(items, list):
+            raise ValueError("items 必须是数组")
+        return repo_replace_teacher_class_courses(class_id, items, current_user=current_user)
+    except Exception as exc:
+        raise _teacher_repo_error(exc)
+
+
+@app.patch("/api/teacher/teaching-classes/{class_id}/courses/{course_id}/content")
+async def teacher_update_course_content(
+    class_id: int,
+    course_id: int,
+    body: dict[str, Any] = Body(...),
+    current_user: dict[str, Any] = Depends(require_teacher_user),
+):
+    """更新教学班某门课程的教学内容。
+
+    前端 TeachingClasses 页面通过 updateTeachingClassCourseContent 调用此接口。
+    请求体: {"teachingContent": "..."}
+    """
+    try:
+        teaching_content = body.get("teachingContent")
+        return repo_update_teacher_class_course_content(
+            class_id, course_id, teaching_content, current_user=current_user
+        )
     except Exception as exc:
         raise _teacher_repo_error(exc)
 
@@ -2122,7 +2229,11 @@ async def teacher_class_interventions(
     current_user: dict[str, Any] = Depends(require_teacher_user),
 ):
     try:
-        return list_interventions(int(current_user.get("user_id") or 0), class_id)
+        return list_interventions(
+            int(current_user.get("user_id") or 0),
+            class_id,
+            is_admin=str(current_user.get("role") or "").lower() == "admin",
+        )
     except Exception as exc:
         raise _teacher_repo_error(exc)
 
@@ -2162,6 +2273,7 @@ async def teacher_class_intervention_detail(
             int(current_user.get("user_id") or 0),
             class_id,
             intervention_id,
+            is_admin=str(current_user.get("role") or "").lower() == "admin",
         )
     except Exception as exc:
         raise _teacher_repo_error(exc)
@@ -2180,6 +2292,7 @@ async def teacher_update_class_intervention(
             class_id,
             intervention_id,
             request.status,
+            is_admin=str(current_user.get("role") or "").lower() == "admin",
         )
     except Exception as exc:
         raise _teacher_repo_error(exc)
@@ -2196,6 +2309,7 @@ async def teacher_refresh_class_intervention(
             int(current_user.get("user_id") or 0),
             class_id,
             intervention_id,
+            is_admin=str(current_user.get("role") or "").lower() == "admin",
         )
     except Exception as exc:
         raise _teacher_repo_error(exc)
@@ -2706,14 +2820,14 @@ def extract_recent_http_responses(container_name: str, logs: str, max_requests: 
     if not requests:
         return ""
 
-    # 收集每个请求的响应关键信息
-    entries = []
-    for method, path, status, size in requests:
+    # 收集每个请求的响应关键信息（并行执行 curl，避免串行 8×3s 阻塞）
+    # 每个请求独立执行 docker exec + curl，总耗时 ≈ 单个最慢请求，而非全部之和。
+    def _fetch_one(method: str, path: str, status: str, size: str) -> dict:
         entry = {"method": method, "path": path, "status": status, "size": size,
                  "title": "", "errors": [], "preview": ""}
         try:
-            # 在容器内用 curl 获取响应，限制 3 秒超时，取前 5000 字节
-            cmd = f"curl -s --max-time 3 'http://localhost:80{path}' | head -c 5000"
+            # 在容器内用 curl 获取响应，限制 2 秒超时，取前 5000 字节
+            cmd = f"curl -s --max-time 2 'http://localhost:80{path}' | head -c 5000"
             result = docker_tools.exec_in_container(container_name, cmd)
             if result.get("success") and result.get("output"):
                 raw_html = result["output"]
@@ -2741,7 +2855,10 @@ def extract_recent_http_responses(container_name: str, logs: str, max_requests: 
                 entry["preview"] = text[:300]
         except Exception:
             entry["preview"] = "(获取响应失败)"
-        entries.append(entry)
+        return entry
+
+    with ThreadPoolExecutor(max_workers=min(6, len(requests) or 1)) as pool:
+        entries = list(pool.map(lambda r: _fetch_one(*r), requests))
 
     # 生成结构化报告
     lines = []
@@ -2809,9 +2926,20 @@ async def chat(req: ChatRequest):
 
             # 从日志里提取最近的 GET 请求，用 curl 获取响应内容，
             # 让 Agent 不仅知道"用户做了什么"，还知道"服务器返回了什么"。
-            response_summary = extract_recent_http_responses(
-                req.container_name, raw_logs, max_requests=8
-            )
+            # 并行执行 + 整体超时兜底：即使容器慢/无 curl，也最多等 8 秒，
+            # 不阻塞 AI 首字响应（此前串行 curl 最坏可能阻塞 24 秒）。
+            try:
+                response_summary = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        extract_recent_http_responses,
+                        req.container_name,
+                        raw_logs,
+                        max_requests=8,
+                    ),
+                    timeout=8.0,
+                )
+            except asyncio.TimeoutError:
+                response_summary = ""
 
             # 容器日志（特别是 sqli-lab 等靶机日志）里包含 URL 编码的攻击 payload
             # （如 %27+OR+1%3D1），会触发 Dify Cloudflare WAF 拦截（403）。
@@ -2904,7 +3032,20 @@ async def list_all_containers(
         raise HTTPException(status_code=500, detail=result["error"])
     return result
 
-# --- 新增：启动容器 ---
+# 端口到 nginx 代理路径的映射（生产环境通过 nginx 反向代理访问靶场）
+# 开发环境直连 localhost:port，生产环境用相对路径走 nginx 代理
+_HOST_PORT_TO_NGINX_PATH = {
+    "8091": "/targets/sqli/",
+    "8092": "/targets/xss/",
+    "8093": "/targets/csrf/",
+    "8090": "/targets/cmd/",
+    "8094": "/targets/upload/",
+    "8095": "/targets/dir/",
+    "8096": "/targets/stack/",
+    "8896": "/targets/protocol/",
+}
+
+
 @app.post("/api/docker/start/{container_name}")
 async def start_container(
     container_name: str,
@@ -2925,7 +3066,15 @@ async def start_container(
             if bindings and isinstance(bindings, list):
                 host_port = bindings[0].get("HostPort")
                 break
-        target_url = f"http://localhost:{host_port}" if host_port else None
+        # 优先用 nginx 代理路径（相对路径），前端浏览器自动用当前域名访问
+        # 这样无论用户从哪个 IP 访问平台，iframe 都能正确加载靶场
+        if host_port and str(host_port) in _HOST_PORT_TO_NGINX_PATH:
+            target_url = _HOST_PORT_TO_NGINX_PATH[str(host_port)]
+        elif host_port:
+            # 未在映射表中的端口，回退到 localhost（开发环境可用）
+            target_url = f"http://localhost:{host_port}"
+        else:
+            target_url = None
         result["data"] = {
             "containerRunning": container_data.get("status") == "running",
             "hostPort": int(host_port) if host_port else None,

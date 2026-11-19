@@ -1,4 +1,4 @@
-package me.myot233.seclab.experimentmoduleservice.dto
+package dto
 
 data class ApiResponse<T>(
     val isSuccess: Int,

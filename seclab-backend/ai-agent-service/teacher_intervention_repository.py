@@ -466,18 +466,26 @@ def _serialize_intervention(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def get_intervention(teacher_id: int, class_id: int, intervention_id: int) -> dict[str, Any]:
+def get_intervention(
+    teacher_id: int,
+    class_id: int,
+    intervention_id: int,
+    *,
+    is_admin: bool = False,
+) -> dict[str, Any]:
     require_owned_teaching_class(teacher_id, class_id)
     ensure_intervention_schema()
+    teacher_filter = "" if is_admin else "AND teacher_id = %s"
+    teacher_params: list[Any] = [] if is_admin else [teacher_id]
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT * FROM teacher_intervention
-                WHERE intervention_id = %s AND teacher_id = %s AND teaching_class_id = %s
+                WHERE intervention_id = %s {teacher_filter} AND teaching_class_id = %s
                 LIMIT 1
                 """,
-                (intervention_id, teacher_id, class_id),
+                [intervention_id, *teacher_params, class_id],
             )
             row = cursor.fetchone()
             if not row:
@@ -564,22 +572,35 @@ def get_intervention(teacher_id: int, class_id: int, intervention_id: int) -> di
     return result
 
 
-def list_interventions(teacher_id: int, class_id: int) -> dict[str, Any]:
+def list_interventions(
+    teacher_id: int,
+    class_id: int,
+    *,
+    is_admin: bool = False,
+) -> dict[str, Any]:
     require_owned_teaching_class(teacher_id, class_id)
     ensure_intervention_schema()
+    teacher_filter = "" if is_admin else "AND teacher_id = %s"
+    teacher_params: list[Any] = [] if is_admin else [teacher_id]
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT intervention_id
                 FROM teacher_intervention
-                WHERE teacher_id = %s AND teaching_class_id = %s
+                WHERE teaching_class_id = %s {teacher_filter}
                 ORDER BY created_at DESC, intervention_id DESC
                 """,
-                (teacher_id, class_id),
+                [class_id, *teacher_params],
             )
             ids = [int(row["intervention_id"]) for row in cursor.fetchall() or []]
-    return {"teachingClassId": class_id, "items": [get_intervention(teacher_id, class_id, value) for value in ids]}
+    return {
+        "teachingClassId": class_id,
+        "items": [
+            get_intervention(teacher_id, class_id, value, is_admin=is_admin)
+            for value in ids
+        ],
+    }
 
 
 def update_intervention_status(
@@ -587,11 +608,13 @@ def update_intervention_status(
     class_id: int,
     intervention_id: int,
     status: str,
+    *,
+    is_admin: bool = False,
 ) -> dict[str, Any]:
     status = str(status or "").upper()
     if status not in INTERVENTION_STATUSES:
         raise ValueError("unsupported intervention status")
-    get_intervention(teacher_id, class_id, intervention_id)
+    get_intervention(teacher_id, class_id, intervention_id, is_admin=is_admin)
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -599,15 +622,17 @@ def update_intervention_status(
                 (status, intervention_id),
             )
         conn.commit()
-    return get_intervention(teacher_id, class_id, intervention_id)
+    return get_intervention(teacher_id, class_id, intervention_id, is_admin=is_admin)
 
 
 def refresh_intervention_metrics(
     teacher_id: int,
     class_id: int,
     intervention_id: int,
+    *,
+    is_admin: bool = False,
 ) -> dict[str, Any]:
-    intervention = get_intervention(teacher_id, class_id, intervention_id)
+    intervention = get_intervention(teacher_id, class_id, intervention_id, is_admin=is_admin)
     with get_connection() as conn:
         with conn.cursor() as cursor:
             for student in intervention["students"]:
@@ -652,7 +677,7 @@ def refresh_intervention_metrics(
                     ),
                 )
         conn.commit()
-    return get_intervention(teacher_id, class_id, intervention_id)
+    return get_intervention(teacher_id, class_id, intervention_id, is_admin=is_admin)
 
 
 def list_student_assignments(student_id: int) -> dict[str, Any]:

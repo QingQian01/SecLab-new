@@ -44,7 +44,9 @@ while true; do
   if [ -n "$cur" ] && [ "$cur" != "$last" ]; then
     if [ -n "$last" ]; then
       sleep 0.5
-      xfce4-panel --restart >/dev/null 2>&1 &
+      # 用 killall + 重启代替 xfce4-panel --restart，避免 D-Bus 报错弹窗
+      killall xfce4-panel 2>/dev/null
+      ( xfce4-panel >/dev/null 2>&1 & ) 2>/dev/null
       xfdesktop --reload >/dev/null 2>&1 &
     fi
     last="$cur"

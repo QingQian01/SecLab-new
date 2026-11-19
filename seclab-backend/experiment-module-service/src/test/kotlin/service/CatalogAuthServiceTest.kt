@@ -1,4 +1,4 @@
-package me.myot233.seclab.experimentmoduleservice.service
+package service
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals

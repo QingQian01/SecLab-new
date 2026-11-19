@@ -1,10 +1,10 @@
-package me.myot233.seclab.experimentmoduleservice.controller
+package controller
 
-import me.myot233.seclab.experimentmoduleservice.dto.ApiResponse
-import me.myot233.seclab.experimentmoduleservice.dto.ModuleMutationRequest
-import me.myot233.seclab.experimentmoduleservice.dto.ModuleOverviewDto
-import me.myot233.seclab.experimentmoduleservice.service.CatalogAuthService
-import me.myot233.seclab.experimentmoduleservice.service.CatalogQueryService
+import dto.ApiResponse
+import dto.ModuleMutationRequest
+import dto.ModuleOverviewDto
+import service.CatalogAuthService
+import service.CatalogQueryService
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping

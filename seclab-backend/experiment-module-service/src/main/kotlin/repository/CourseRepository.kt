@@ -1,6 +1,6 @@
-package me.myot233.seclab.experimentmoduleservice.repository
+package repository
 
-import me.myot233.seclab.experimentmoduleservice.entity.CourseEntity
+import entity.CourseEntity
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 

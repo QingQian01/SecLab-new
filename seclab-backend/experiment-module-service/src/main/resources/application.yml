@@ -22,6 +22,13 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 256MB
+      max-request-size: 260MB
+      file-size-threshold: 1MB
+
 server:
   port: 8084
   address: 0.0.0.0
@@ -29,6 +36,11 @@ server:
 seclab:
   jwt:
     secret: ${USER_SERVICE_JWT_SECRET:SecLabUserServiceJwtSecretChangeMeAtLeast32Chars}
+  lab-package:
+    # 实验包 zip 落盘根目录（相对路径以服务工作目录为基准）
+    storage-dir: ${LAB_PACKAGE_STORAGE_DIR:./lab-packages}
+    # 单个 zip 大小上限（字节），默认 256MB
+    max-size-bytes: ${LAB_PACKAGE_MAX_SIZE_BYTES:268435456}
 
 eureka:
   client:

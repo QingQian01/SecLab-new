@@ -6,6 +6,7 @@ export interface Course {
   difficulty: 1 | 2 | 3 | 4 | 5
   category: string
   status: 'draft' | 'published' | 'archived'
+  tags?: string[]
   studentCount: number
   experimentCount: number
   createTime: string

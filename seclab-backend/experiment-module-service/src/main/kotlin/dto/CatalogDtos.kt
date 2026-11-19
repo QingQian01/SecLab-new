@@ -1,4 +1,4 @@
-package me.myot233.seclab.experimentmoduleservice.dto
+package dto
 
 data class CourseSummaryDto(
     val id: Int,
@@ -17,7 +17,9 @@ data class CourseSummaryDto(
     val category: String? = type,
     val createTime: String? = null,
     val createdBy: Long? = null,
-    val creatorEditable: Boolean = createdBy != null,
+    // 共享课程（createdBy == null）与本人创建的课程均可编辑；他人创建的课程不可编辑。
+    // 这里默认 true，具体不可编辑场景由前端基于 createdBy 与当前用户判断。
+    val creatorEditable: Boolean = true,
 )
 
 data class ModuleOverviewDto(
@@ -55,4 +57,25 @@ data class ModuleMutationRequest(
     val difficulty: Int? = null,
     val type: String? = null,
     val image: String? = null,
+)
+
+/**
+ * 实验包登记记录（教师上传 zip 后返回）。
+ * 本期仅登记元数据，不触发 docker build / 启动。
+ */
+data class LabPackageDto(
+    val id: Long,
+    val moduleId: Int?,
+    val labKey: String,
+    val imageName: String?,
+    val hostPort: Int?,
+    val flag: String?,
+    val packagePath: String,
+    val originalFilename: String?,
+    val sizeBytes: Long?,
+    val uploadedBy: Long?,
+    val status: String,
+    val remark: String?,
+    val createdAt: String?,
+    val updatedAt: String?,
 )

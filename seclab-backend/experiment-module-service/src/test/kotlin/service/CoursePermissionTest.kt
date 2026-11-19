@@ -1,10 +1,10 @@
-package me.myot233.seclab.experimentmoduleservice.service
+package service
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import me.myot233.seclab.experimentmoduleservice.dto.CourseMutationRequest
-import me.myot233.seclab.experimentmoduleservice.entity.CourseEntity
-import me.myot233.seclab.experimentmoduleservice.repository.CourseRepository
-import me.myot233.seclab.experimentmoduleservice.repository.ModuleRepository
+import dto.CourseMutationRequest
+import entity.CourseEntity
+import repository.CourseRepository
+import repository.ModuleRepository
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test

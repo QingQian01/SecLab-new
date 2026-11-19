@@ -14,6 +14,7 @@ const classFilter = ref('')
 const currentUserId = ref<number | null>(null)
 const currentStudentNumber = ref('')
 let refreshTimer: number | undefined
+let autoFilterApplied = false
 
 const classOptions = computed(() => {
   const names = items.value
@@ -58,6 +59,14 @@ async function loadScoreboard() {
     items.value = response.items || []
     updatedAt.value = response.updatedAt || ''
     source.value = response.source || ''
+    // 默认展示当前用户所在班级的排行，仅在首次加载时自动设置，之后尊重手动选择
+    if (!autoFilterApplied) {
+      autoFilterApplied = true
+      const mine = currentUser.value
+      if (mine?.className) {
+        classFilter.value = mine.className
+      }
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '排行榜加载失败，请稍后重试。'
   } finally {

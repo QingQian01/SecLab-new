@@ -11,16 +11,21 @@ import type { Module } from "./pages/User/Module/index.ts";
 import { findExperimentById } from './data';
 
 // 可配置的API基础URL
-// 优先使用环境变量，如果没有则使用默认值
+// 优先使用环境变量，使用 ?? 确保空字符串（生产环境用相对路径由 nginx 代理）被保留
+// 仅在未定义时才使用默认值（开发环境用 localhost，生产环境用空字符串走 nginx 代理）
 const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL ||
-    (import.meta.env.DEV ? "http://localhost:8083" : "/user-service");
-const EXPERIMENT_MODULE_BASE_URL = import.meta.env.VITE_EXPERIMENT_MODULE_BASE_URL || "http://localhost:8084";
-const IMAGE_SERVICE_BASE_URL = import.meta.env.VITE_IMAGE_SERVICE_BASE_URL || "http://localhost:8086/api/images";
+    import.meta.env.VITE_API_BASE_URL ??
+    (import.meta.env.DEV ? "http://localhost:8083" : "");
+const EXPERIMENT_MODULE_BASE_URL = import.meta.env.VITE_EXPERIMENT_MODULE_BASE_URL ??
+    (import.meta.env.DEV ? "http://localhost:8084" : "");
+const IMAGE_SERVICE_BASE_URL = import.meta.env.VITE_IMAGE_SERVICE_BASE_URL ??
+    (import.meta.env.DEV ? "http://localhost:8086/api/images" : "/api/images");
 // Docker API服务器的URL
-const DOCKER_API_URL = import.meta.env.VITE_DOCKER_API_URL || "http://localhost:3000";
+const DOCKER_API_URL = import.meta.env.VITE_DOCKER_API_URL ??
+    (import.meta.env.DEV ? "http://localhost:3000" : "");
 // AI Agent / learning-event API server
-const AGENT_BASE_URL = import.meta.env.VITE_AGENT_BASE_URL || "http://localhost:8010";
+const AGENT_BASE_URL = import.meta.env.VITE_AGENT_BASE_URL ??
+    (import.meta.env.DEV ? "http://localhost:8010" : "");
 
 const BASE_URL: string = API_BASE_URL;
 const IMAGE_URL = `${IMAGE_SERVICE_BASE_URL}/files/`;
@@ -289,6 +294,7 @@ export interface ProfileDashboardResponse {
     userStats: {
         completedCourses: number;
         totalScore: number;
+        completedExperiments?: number;
         ranking: number;
         activeStreak: number;
     };
@@ -1979,6 +1985,7 @@ export function mapCourseSummaryDtoToAdminCourse(course: CourseSummaryDto): Admi
         difficulty: clampDifficulty(course.difficulty),
         category: course.type || "未分类",
         status: mapTeacherCourseStatus(course.status),
+        tags: course.tags || [],
         studentCount: 0,
         experimentCount: 0,
         createTime: "",
@@ -2310,6 +2317,74 @@ export async function removeCourseModule(courseId: number, moduleId: number): Pr
     return (response.data.data || []).map(mapModuleOverviewToAdminExperiment);
 }
 
+export interface LabPackageDto {
+    id: number;
+    moduleId: number | null;
+    labKey: string;
+    imageName: string | null;
+    hostPort: number | null;
+    flag: string | null;
+    packagePath: string;
+    originalFilename: string | null;
+    sizeBytes: number | null;
+    uploadedBy: number | null;
+    status: string;
+    remark: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+}
+
+export interface LabPackageUploadPayload {
+    file: File;
+    labKey: string;
+    imageName?: string | null;
+    hostPort?: number | null;
+    flag?: string | null;
+    moduleName?: string | null;
+    moduleDescription?: string | null;
+    moduleDifficulty?: number | null;
+    moduleType?: string | null;
+    remark?: string | null;
+}
+
+export async function uploadLabPackage(payload: LabPackageUploadPayload): Promise<LabPackageDto> {
+    const formData = new FormData();
+    formData.append('file', payload.file);
+    formData.append('labKey', payload.labKey);
+    if (payload.imageName) formData.append('imageName', payload.imageName);
+    if (payload.hostPort != null) formData.append('hostPort', String(payload.hostPort));
+    if (payload.flag) formData.append('flag', payload.flag);
+    if (payload.moduleName) formData.append('moduleName', payload.moduleName);
+    if (payload.moduleDescription) formData.append('moduleDescription', payload.moduleDescription);
+    if (payload.moduleDifficulty != null) formData.append('moduleDifficulty', String(payload.moduleDifficulty));
+    if (payload.moduleType) formData.append('moduleType', payload.moduleType);
+    if (payload.remark) formData.append('remark', payload.remark);
+
+    const authConfig = getTeacherCatalogAuthConfig();
+    const response = await axios.post<Result<LabPackageDto>>(
+        `${EXPERIMENT_MODULE_BASE_URL}/lab-package/upload`,
+        formData,
+        {
+            headers: {
+                ...authConfig.headers,
+                'Content-Type': 'multipart/form-data',
+            },
+            timeout: 120000,
+        },
+    );
+    if (!response.data.data) {
+        throw new Error(response.data.message || '实验包上传失败');
+    }
+    return response.data.data;
+}
+
+export async function getLabPackageList(): Promise<LabPackageDto[]> {
+    const response = await axios.get<Result<LabPackageDto[]>>(
+        `${EXPERIMENT_MODULE_BASE_URL}/lab-package`,
+    );
+    return response.data.data || [];
+}
+
 export async function getClassProfileLatest(classId: number): Promise<ClassProfileLatestDto> {
     const response = await axios.get(`${AGENT_BASE_URL}/api/class-profile/${classId}/latest`);
     return response.data;
@@ -2387,6 +2462,13 @@ export async function getTeacherGeneratedQuestions(
 }
 
 function unwrapTeacherResult<T>(result: Result<T>, fallback: string): T {
+    // 兼容 ai-agent-service 返回的 {success: true, items: [...]} 格式
+    // （ai-agent-service 的教师接口不走 Spring Boot 的 Result 包装，直接返回 FastAPI 的 jsonify 结果）
+    const agentResult = result as Result<T> & { success?: boolean; items?: T };
+    if (agentResult.success === true && agentResult.items !== undefined && agentResult.items !== null) {
+        return agentResult.items;
+    }
+
     const succeeded = result.isSuccess === 1
         || (result.isSuccess === undefined && result.status >= 200 && result.status < 300);
     if (!succeeded || result.data === undefined || result.data === null) {

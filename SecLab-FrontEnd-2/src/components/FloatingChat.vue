@@ -59,11 +59,8 @@
               class="chat chat-end"
             >
               <div class="chat-image avatar">
-                <div class="w-6 rounded-full ring ring-primary ring-offset-base-100 ring-offset-1">
-                  <img 
-                    src="https://api.dicebear.com/7.x/avataaars/svg?seed=user"
-                    alt="用户"
-                  />
+                <div class="w-6 rounded-full ring ring-primary ring-offset-base-100 ring-offset-1 bg-primary text-primary-content flex items-center justify-center">
+                    <i class="fas fa-user text-xs"></i>
                 </div>
               </div>
               <div class="chat-bubble chat-bubble-primary text-xs">
@@ -440,8 +437,9 @@ const inputMessage = ref('')
 const isLoading = ref(false)
 const chatContainer = ref<HTMLElement | null>(null)
 const inputField = ref<HTMLTextAreaElement | null>(null)
-// Agent 服务地址（指向本地 FastAPI）
-const AGENT_BASE_URL = import.meta.env.VITE_AGENT_BASE_URL || 'http://localhost:8010'
+// Agent 服务地址（生产环境用相对路径由 nginx 代理，开发环境用 localhost）
+const AGENT_BASE_URL = import.meta.env.VITE_AGENT_BASE_URL ??
+    (import.meta.env.DEV ? 'http://localhost:8010' : '')
 
 // 会话 ID（保持多轮对话上下文）
 const conversationId = ref<string>('')
@@ -603,7 +601,8 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
                     inThinkBlock = false
                     delta = delta.substring(endIdx + 8)
                   } else {
-                    delta = ''  // 整个分片都在 think 块内，丢弃
+                    completeThinking += delta  // 累积思考内容，用于兜底
+                    delta = ''
                   }
                 }
                 if (!inThinkBlock && delta) {
@@ -611,11 +610,13 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
                   if (startIdx >= 0) {
                     const endIdx = delta.indexOf('</think>', startIdx)
                     if (endIdx >= 0) {
-                      // 同一分片内闭合，去掉 think 块，继续处理剩余部分
+                      // 同一分片内闭合，累积思考内容，去掉 think 块，继续处理剩余部分
+                      completeThinking += delta.substring(startIdx + 7, endIdx)
                       delta = delta.substring(0, startIdx) + delta.substring(endIdx + 8)
                     } else {
-                      // think 块开始但未闭合
+                      // think 块开始但未闭合，累积思考内容
                       inThinkBlock = true
+                      completeThinking += delta.substring(startIdx + 7)
                       delta = delta.substring(0, startIdx)
                     }
                   } else {
@@ -633,6 +634,10 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
 
           // 消息结束
           if (chunk.event === 'message_end') {
+            // 兜底：Dify Agent 有时会把整个回答包在思考标签里
+            if (!completeResponse && completeThinking) {
+              completeResponse = completeThinking
+            }
             messages.value[messageIndex].content = completeResponse
             messages.value[messageIndex].isStreaming = false
           }
@@ -649,6 +654,9 @@ const callDifyAgent = async (userQuestion: string, messageIndex: number) => {
 
     // 兜底：流结束但未收到 message_end
     if (messages.value[messageIndex].isStreaming) {
+      if (!completeResponse && completeThinking) {
+        completeResponse = completeThinking
+      }
       messages.value[messageIndex].content = completeResponse || '（无回复）'
       messages.value[messageIndex].isStreaming = false
     }

@@ -1,11 +1,25 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import { clearStoredAuthSession } from '../../auth';
 import { useTheme } from '../../composables/useTheme';
 
 const route = useRoute();
+const router = useRouter();
 const { currentTheme, toggleTheme } = useTheme();
 const isLoaded = ref(false);
+
+// 左上角 Logo：回到首页（使用 SPA 路由跳转，避免整页刷新掉到登录页）
+const goHome = () => {
+  router.push('/user/welcome');
+};
+
+// 右上角退出登录：清理本地会话后回到登录页
+const logout = () => {
+  if (!window.confirm('确定要退出登录吗？')) return;
+  clearStoredAuthSession();
+  router.replace('/');
+};
 
 // 导航项配置
 const navItems = [
@@ -63,11 +77,14 @@ const isActive = (path: string) => {
   <div class="fixed top-0 left-0 right-0 z-50 transition-all duration-300"
        :class="{ 'translate-y-0 opacity-100': isLoaded, '-translate-y-full opacity-0': !isLoaded }">
     <div class="navbar bg-base-100 shadow-lg backdrop-blur-md bg-opacity-90 px-4">
-      <!-- Logo区域 -->
+      <!-- Logo区域：点击回到首页 -->
       <div class="flex-1">
-        <a href="/user/welcome" 
-           class="btn btn-ghost gap-2 text-2xl font-bold normal-case transition-all duration-300
-                 hover:scale-105 group">
+        <button type="button"
+                @click="goHome"
+                aria-label="返回首页"
+                title="返回首页"
+                class="btn btn-ghost gap-2 text-2xl font-bold normal-case transition-all duration-300
+                       hover:scale-105 group">
           <div class="relative">
             <i class="fas fa-shield-alt text-primary"></i>
             <div class="absolute -top-1 -right-1 w-2 h-2 bg-primary rounded-full 
@@ -75,7 +92,7 @@ const isActive = (path: string) => {
           </div>
           <span>Sec</span>
           <span class="text-primary">Lab</span>
-        </a>
+        </button>
       </div>
 
       <!-- 导航菜单 -->
@@ -124,6 +141,12 @@ const isActive = (path: string) => {
                 :aria-label="currentTheme === 'night' ? '切换到亮色模式' : '切换到暗色模式'"
                 :title="currentTheme === 'night' ? '切换到亮色模式' : '切换到暗色模式'">
           <i :class="['fas', currentTheme === 'night' ? 'fa-sun' : 'fa-moon', 'text-lg']"></i>
+        </button>
+        <button @click="logout"
+                class="btn btn-ghost btn-circle ml-1"
+                aria-label="退出登录"
+                title="退出登录">
+          <i class="fas fa-right-from-bracket text-lg"></i>
         </button>
       </div>
     </div>
